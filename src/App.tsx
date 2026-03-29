@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { HomeView } from "./views/HomeView";
 import { AlgosView } from "./views/AlgosView";
 import { TradingView } from "./views/TradingView";
+import { TitleBar } from "./components/TitleBar";
 
 type Algo = {
   id: number;
@@ -134,7 +135,9 @@ export const App = () => {
   };
 
   return (
-    <div className="flex h-screen bg-[var(--bg-primary)]">
+    <div className="flex flex-col h-screen bg-[var(--bg-primary)]">
+      <TitleBar title="Wolf Den" />
+      <div className="flex flex-1 min-h-0">
       {/* Sidebar Navigation */}
       <Sidebar
         activeView={activeView}
@@ -171,6 +174,7 @@ export const App = () => {
       {activeView === "trading" && (
         <TradingView connectionStatus={connectionStatus} />
       )}
+      </div>
     </div>
   );
 };
