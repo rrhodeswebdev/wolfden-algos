@@ -85,7 +85,33 @@ pub fn initialize(path: &Path) -> Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_algo_runs_session ON algo_runs(session_id);",
     )?;
 
+    seed_sample_algos(&conn)?;
+
     Ok(conn)
+}
+
+fn seed_sample_algos(conn: &Connection) -> Result<()> {
+    let samples: &[(&str, &str)] = &[
+        ("Demo: EMA Crossover", include_str!("../../algo_runtime/examples/ema_cross.py")),
+        ("Demo: CVD Divergence", include_str!("../../algo_runtime/examples/cvd_divergence.py")),
+        ("Demo: Scalper", include_str!("../../algo_runtime/examples/scalper.py")),
+    ];
+
+    for (name, code) in samples {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM algos WHERE name = ?1)",
+            params![name],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            conn.execute(
+                "INSERT INTO algos (name, code, dependencies) VALUES (?1, ?2, '')",
+                params![name, code],
+            )?;
+        }
+    }
+
+    Ok(())
 }
 
 // --- Algo CRUD ---
