@@ -13,10 +13,9 @@ type HomeViewProps = {
   connectionStatus: "waiting" | "connected" | "error";
   algos: Algo[];
   activeRuns: AlgoRun[];
-  onNavigate: (view: "algos" | "trading") => void;
 };
 
-export const HomeView = ({ connectionStatus, algos, activeRuns, onNavigate }: HomeViewProps) => {
+export const HomeView = ({ connectionStatus, algos, activeRuns }: HomeViewProps) => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Hero Header */}
@@ -71,7 +70,7 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, onNavigate }: Ho
           </div>
         </div>
 
-        {/* Right Column: Active Algos + Quick Actions */}
+        {/* Right Column: Active Algos */}
         <div className="flex-1 flex flex-col p-5 overflow-auto">
           {/* Active Algos */}
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-4">
@@ -79,15 +78,15 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, onNavigate }: Ho
           </h2>
 
           <div className="flex-1 min-h-0">
-            {algos.length === 0 ? (
+            {activeRuns.length === 0 ? (
               <p className="text-sm text-[var(--text-secondary)]">
-                No algos yet — create one in Algo Management
+                No algos running — start one from Algo Management
               </p>
             ) : (
               <div className="space-y-2">
-                {algos.map((algo) => {
-                  const run = activeRuns.find((r) => r.algo_id === algo.id);
-                  const isRunning = run?.status === "running";
+                {activeRuns.map((run) => {
+                  const algo = algos.find((a) => a.id === run.algo_id);
+                  if (!algo) return null;
                   return (
                     <div
                       key={algo.id}
@@ -96,30 +95,22 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, onNavigate }: Ho
                       <div className="flex items-center gap-3">
                         <div
                           className={`w-2 h-2 rounded-full ${
-                            isRunning
-                              ? run?.mode === "live"
-                                ? "bg-[var(--accent-green)]"
-                                : "bg-[var(--accent-yellow)]"
-                              : "bg-[var(--border)]"
+                            run.mode === "live"
+                              ? "bg-[var(--accent-green)]"
+                              : "bg-[var(--accent-yellow)]"
                           }`}
                         />
                         <span className="text-sm">{algo.name}</span>
                       </div>
-                      <div className="flex items-center gap-4">
-                        {isRunning ? (
-                          <span
-                            className={`text-[10px] uppercase px-2.5 py-1 rounded-md font-medium ${
-                              run?.mode === "live"
-                                ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
-                                : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
-                            }`}
-                          >
-                            {run?.mode}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-[var(--text-secondary)]">stopped</span>
-                        )}
-                      </div>
+                      <span
+                        className={`text-[10px] uppercase px-2.5 py-1 rounded-md font-medium ${
+                          run.mode === "live"
+                            ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+                            : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
+                        }`}
+                      >
+                        {run.mode}
+                      </span>
                     </div>
                   );
                 })}
@@ -127,38 +118,6 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, onNavigate }: Ho
             )}
           </div>
 
-          {/* Quick Actions */}
-          <div className="mt-5">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-3">
-              Quick Actions
-            </h2>
-            <div className="flex gap-3">
-              <button
-                onClick={() => onNavigate("algos")}
-                className="flex-1 flex items-center gap-3 p-3.5 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)] hover:border-[var(--accent-blue)]/40 transition-colors text-left"
-              >
-                <span className="text-xl">λ</span>
-                <div>
-                  <div className="text-sm font-medium">Algo Management</div>
-                  <div className="text-[10px] text-[var(--text-secondary)] mt-0.5">
-                    Write, edit & manage algos
-                  </div>
-                </div>
-              </button>
-              <button
-                onClick={() => onNavigate("trading")}
-                className="flex-1 flex items-center gap-3 p-3.5 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)] hover:border-[var(--accent-blue)]/40 transition-colors text-left"
-              >
-                <span className="text-xl">⇅</span>
-                <div>
-                  <div className="text-sm font-medium">Trading View</div>
-                  <div className="text-[10px] text-[var(--text-secondary)] mt-0.5">
-                    Positions, orders & P&L
-                  </div>
-                </div>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
