@@ -270,7 +270,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
         <div className="flex-1 grid grid-cols-4 gap-4 p-4 bg-[var(--bg-panel)] rounded-lg">
           <StatCell label="Win Rate" value={filteredStats.totalTrades > 0 ? `${filteredStats.winRate}%` : "--"} />
           <StatCell label="Trades" value={`${filteredStats.totalTrades}`} />
-          <StatCell label="Drawdown" value={filteredStats.totalTrades > 0 ? `$${Math.abs(Math.round(filteredStats.maxDrawdown)).toLocaleString()}` : "--"} />
+          <StatCell label="Drawdown" value={filteredStats.totalTrades > 0 ? `$${Math.abs(filteredStats.maxDrawdown).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--"} />
           <StatCell label="Sharpe" value={filteredStats.sharpe} />
         </div>
       </div>
@@ -292,7 +292,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
       </div>
 
       {/* Bottom Row: Positions + Orders */}
-      <div className="flex gap-3 h-56">
+      <div className="flex gap-3 flex-1 min-h-0">
         <div className="flex-1 bg-[var(--bg-panel)] rounded-lg flex flex-col overflow-hidden">
           <div className="px-4 py-2.5 border-b border-[var(--border)]">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
@@ -467,12 +467,25 @@ const PnlChart = ({ data }: { data: number[] }) => {
     const target = targetDataRef.current;
     const current = animatedDataRef.current;
 
-    if (current.length !== target.length) {
-      animatedDataRef.current = [...target];
-    } else {
-      for (let i = 0; i < target.length; i++) {
-        current[i] = lerp(current[i], target[i], 0.06);
+    if (current.length < target.length) {
+      // New points: snap all existing points to their targets, animate only the new one
+      for (let i = 0; i < current.length; i++) {
+        current[i] = target[i];
       }
+      for (let i = current.length; i < target.length; i++) {
+        current.push(current.length > 0 ? current[current.length - 1] : target[i]);
+      }
+    } else if (current.length > target.length) {
+      current.length = target.length;
+    }
+
+    // Only animate the last point; all others are locked
+    for (let i = 0; i < target.length - 1; i++) {
+      current[i] = target[i];
+    }
+    if (target.length > 0) {
+      const last = target.length - 1;
+      current[last] = lerp(current[last], target[last], 0.06);
     }
 
     const animData = animatedDataRef.current;
@@ -502,7 +515,9 @@ const PnlChart = ({ data }: { data: number[] }) => {
     const range = max - min || 1;
     const padding = range * 0.1;
 
-    const toX = (i: number) => (i / (animData.length - 1)) * w;
+    const minPoints = 60;
+    const xScale = Math.max(animData.length - 1, minPoints);
+    const toX = (i: number) => (i / xScale) * w;
     const toY = (v: number) => h - ((v - min + padding) / (range + padding * 2)) * h;
 
     // Zero line
@@ -591,7 +606,7 @@ const PnlChart = ({ data }: { data: number[] }) => {
     const mouse = mouseRef.current;
     if (mouse) {
       // Find nearest data index
-      const idx = Math.round((mouse.x / w) * (animData.length - 1));
+      const idx = Math.round((mouse.x / w) * xScale);
       const clampedIdx = Math.max(0, Math.min(animData.length - 1, idx));
       const val = animData[clampedIdx];
       const pointX = toX(clampedIdx);

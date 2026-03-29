@@ -39,14 +39,14 @@ const PerformanceStats = ({ stats }: { stats: AlgoStats }) => {
 
   return (
     <div className="grid grid-cols-4 gap-x-6 gap-y-3 px-6 pb-4 pt-2">
-      <Stat label="P&L" value={`${stats.pnl >= 0 ? "+" : ""}$${Math.abs(Math.round(stats.pnl)).toLocaleString()}`} color={pnlColor} />
+      <Stat label="P&L" value={`${stats.pnl >= 0 ? "+" : ""}$${Math.abs(stats.pnl).toFixed(2)}`} color={pnlColor} />
       <Stat label="Win Rate" value={stats.totalTrades > 0 ? `${stats.winRate}%` : "--"} />
       <Stat label="Sharpe" value={stats.sharpe} />
       <Stat label="Profit Factor" value={stats.profitFactor} />
       <Stat label="Total Trades" value={`${stats.totalTrades}`} />
-      <Stat label="Avg Win" value={stats.totalTrades > 0 ? `+$${stats.avgWin}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-green)]" : undefined} />
-      <Stat label="Avg Loss" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.avgLoss)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
-      <Stat label="Max Drawdown" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.maxDrawdown).toLocaleString()}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
+      <Stat label="Avg Win" value={stats.totalTrades > 0 ? `+$${stats.avgWin.toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-green)]" : undefined} />
+      <Stat label="Avg Loss" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.avgLoss).toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
+      <Stat label="Max Drawdown" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.maxDrawdown).toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
     </div>
   );
 };
