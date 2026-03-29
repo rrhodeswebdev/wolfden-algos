@@ -70,7 +70,7 @@ export const AlgoEditor = ({ code, onChange, onSave }: AlgoEditorProps) => {
           options={{
             fontSize: 13,
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-            minimap: { enabled: true },
+            minimap: { enabled: false },
             scrollBeyondLastLine: false,
             automaticLayout: true,
             tabSize: 4,
