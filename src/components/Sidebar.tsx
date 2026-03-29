@@ -1,3 +1,5 @@
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+
 type View = "home" | "algos" | "trading";
 
 type SidebarProps = {
@@ -11,6 +13,23 @@ const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
   { view: "algos", label: "Algos", icon: "λ" },
   { view: "trading", label: "Trading", icon: "⇅" },
 ];
+
+const openGuideWindow = async () => {
+  const existing = await WebviewWindow.getByLabel("guide");
+  if (existing) {
+    await existing.setFocus();
+    return;
+  }
+  new WebviewWindow("guide", {
+    title: "Wolf Den — Guide",
+    url: "guide.html",
+    width: 860,
+    height: 700,
+    resizable: true,
+    titleBarStyle: "overlay",
+    hiddenTitle: true,
+  });
+};
 
 export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarProps) => {
   return (
@@ -38,6 +57,18 @@ export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarPro
           </button>
         ))}
       </nav>
+
+      {/* Guide (bottom) */}
+      <div className="flex flex-col items-center pb-4 gap-4">
+        <button
+          onClick={openGuideWindow}
+          className="flex flex-col items-center justify-center w-14 h-14 rounded-xl transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-panel)] hover:text-[var(--text-primary)]"
+          title="Guide"
+        >
+          <span className="text-lg leading-none">?</span>
+          <span className="text-[9px] mt-1.5 font-medium uppercase tracking-wider">Guide</span>
+        </button>
+      </div>
 
       {/* Connection Status */}
       <div className="flex items-center justify-center pb-6">
