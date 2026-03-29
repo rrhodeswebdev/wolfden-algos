@@ -86,6 +86,22 @@ export const App = () => {
     }
   };
 
+  const handleRenameAlgo = async (id: number, newName: string) => {
+    const algo = algos.find((a) => a.id === id);
+    if (!algo) return;
+    try {
+      await invoke("update_algo", {
+        id,
+        name: newName,
+        code: algo.code,
+        dependencies: algo.dependencies,
+      });
+      await loadAlgos();
+    } catch (e) {
+      console.error("Failed to rename algo:", e);
+    }
+  };
+
   const handleDeleteAlgo = async (id: number) => {
     try {
       await invoke("delete_algo", { id });
@@ -132,7 +148,6 @@ export const App = () => {
           connectionStatus={connectionStatus}
           algos={algos}
           activeRuns={activeRuns}
-          onNavigate={setActiveView}
         />
       )}
 
@@ -145,6 +160,7 @@ export const App = () => {
           onSelectAlgo={setSelectedAlgoId}
           onCreateAlgo={handleCreateAlgo}
           onDeleteAlgo={handleDeleteAlgo}
+          onRenameAlgo={handleRenameAlgo}
           onStartAlgo={handleStartAlgo}
           onStopAlgo={handleStopAlgo}
           onEditorChange={setEditorCode}

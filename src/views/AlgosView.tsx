@@ -26,6 +26,7 @@ type AlgosViewProps = {
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
   onDeleteAlgo: (id: number) => void;
+  onRenameAlgo: (id: number, newName: string) => void;
   onStartAlgo: (id: number, mode: "live" | "shadow") => void;
   onStopAlgo: (id: number) => void;
   onEditorChange: (code: string) => void;
@@ -40,6 +41,7 @@ export const AlgosView = ({
   onSelectAlgo,
   onCreateAlgo,
   onDeleteAlgo,
+  onRenameAlgo,
   onStartAlgo,
   onStopAlgo,
   onEditorChange,
@@ -51,13 +53,11 @@ export const AlgosView = ({
       <div className="w-72 flex-shrink-0 bg-[var(--bg-panel)] rounded-lg overflow-hidden">
         <AlgoManager
           algos={algos}
-          activeRuns={activeRuns}
           selectedAlgoId={selectedAlgoId}
           onSelectAlgo={onSelectAlgo}
           onCreateAlgo={onCreateAlgo}
           onDeleteAlgo={onDeleteAlgo}
-          onStartAlgo={onStartAlgo}
-          onStopAlgo={onStopAlgo}
+          onRenameAlgo={onRenameAlgo}
         />
       </div>
 

@@ -1,4 +1,6 @@
 
+import { useState, useRef, useEffect } from "react";
+
 type Algo = {
   id: number;
   name: string;
@@ -10,35 +12,53 @@ type Algo = {
   updated_at: string;
 };
 
-type AlgoRun = {
-  algo_id: number;
-  status: string;
-  mode: string;
-};
-
 type AlgoManagerProps = {
   algos: Algo[];
-  activeRuns: AlgoRun[];
+
   selectedAlgoId: number | null;
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
   onDeleteAlgo: (id: number) => void;
-  onStartAlgo: (id: number, mode: "live" | "shadow") => void;
-  onStopAlgo: (id: number) => void;
+  onRenameAlgo: (id: number, newName: string) => void;
 };
 
 export const AlgoManager = ({
   algos,
-  activeRuns,
+
   selectedAlgoId,
   onSelectAlgo,
   onCreateAlgo,
   onDeleteAlgo,
-  onStartAlgo,
-  onStopAlgo,
+  onRenameAlgo,
 }: AlgoManagerProps) => {
-  const getRunStatus = (algoId: number) =>
-    activeRuns.find((r) => r.algo_id === algoId);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingId !== null && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
+
+  const startRename = (algo: Algo) => {
+    setEditingId(algo.id);
+    setEditingName(algo.name);
+  };
+
+  const commitRename = () => {
+    if (editingId === null) return;
+    const trimmed = editingName.trim();
+    if (trimmed && trimmed !== algos.find((a) => a.id === editingId)?.name) {
+      onRenameAlgo(editingId, trimmed);
+    }
+    setEditingId(null);
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -61,69 +81,53 @@ export const AlgoManager = ({
         ) : (
           <div className="divide-y divide-[var(--border)]">
             {algos.map((algo) => {
-              const run = getRunStatus(algo.id);
               const isSelected = algo.id === selectedAlgoId;
-              const isRunning = run?.status === "running";
+              const isEditing = editingId === algo.id;
 
               return (
                 <div
                   key={algo.id}
                   onClick={() => onSelectAlgo(algo.id)}
-                  className={`flex items-center justify-between px-4 py-3 cursor-pointer transition-colors ${
+                  className={`group/algo flex items-center justify-between px-4 py-3 cursor-pointer transition-colors ${
                     isSelected
                       ? "bg-[var(--accent-blue)]/10 border-l-2 border-l-[var(--accent-blue)]"
                       : "hover:bg-[var(--bg-secondary)]"
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        isRunning
-                          ? run.mode === "live"
-                            ? "bg-[var(--accent-green)]"
-                            : "bg-[var(--accent-yellow)]"
-                          : "bg-[var(--border)]"
-                      }`}
-                    />
-                    <span className="text-sm truncate">{algo.name}</span>
-                    {isRunning && (
-                      <span className="text-[10px] uppercase px-2 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
-                        {run.mode}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {isEditing ? (
+                      <input
+                        ref={inputRef}
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename();
+                          if (e.key === "Escape") cancelRename();
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-sm bg-[var(--bg-primary)] text-[var(--text-primary)] border border-[var(--accent-blue)] rounded px-2 py-0.5 outline-none w-full min-w-0"
+                      />
+                    ) : (
+                      <span className="text-sm truncate">
+                        {algo.name}
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {isRunning ? (
+                  <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover/algo:opacity-100 transition-opacity">
+                    {!isEditing && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onStopAlgo(algo.id);
+                          startRename(algo);
                         }}
-                        className="px-3 py-1 text-[11px] bg-[var(--accent-red)]/20 text-[var(--accent-red)] rounded-md hover:bg-[var(--accent-red)]/30"
+                        className="px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-colors"
                       >
-                        Stop
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                          <path d="m15 5 4 4" />
+                        </svg>
                       </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onStartAlgo(algo.id, "shadow");
-                          }}
-                          className="px-3 py-1 text-[11px] bg-[var(--accent-yellow)]/20 text-[var(--accent-yellow)] rounded-md hover:bg-[var(--accent-yellow)]/30"
-                        >
-                          Shadow
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onStartAlgo(algo.id, "live");
-                          }}
-                          className="px-3 py-1 text-[11px] bg-[var(--accent-green)]/20 text-[var(--accent-green)] rounded-md hover:bg-[var(--accent-green)]/30"
-                        >
-                          Live
-                        </button>
-                      </>
                     )}
                     <button
                       onClick={(e) => {
