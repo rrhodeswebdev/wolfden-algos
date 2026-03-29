@@ -24,8 +24,8 @@ const openGuideWindow = async () => {
   new WebviewWindow("guide", {
     title: "Wolf Den — Guide",
     url: "guide.html",
-    width: 860,
-    height: 700,
+    width: 1200,
+    height: 900,
     resizable: true,
     titleBarStyle: "overlay",
     hiddenTitle: true,
