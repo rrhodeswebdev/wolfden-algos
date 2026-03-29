@@ -3,9 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_ALGO } from "./components/AlgoEditor";
 import { Sidebar } from "./components/Sidebar";
 import { HomeView } from "./views/HomeView";
+import { EditorView } from "./views/EditorView";
 import { AlgosView } from "./views/AlgosView";
 import { TradingView } from "./views/TradingView";
 import { TitleBar } from "./components/TitleBar";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { useTradingSimulation } from "./hooks/useTradingSimulation";
 
 type Algo = {
   id: number;
@@ -24,7 +27,7 @@ type AlgoRun = {
   mode: string;
 };
 
-type View = "home" | "algos" | "trading";
+type View = "home" | "editor" | "algos" | "trading";
 
 export const App = () => {
   const [activeView, setActiveView] = useState<View>("home");
@@ -35,6 +38,7 @@ export const App = () => {
   const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
+  const simulation = useTradingSimulation(algos, activeRuns);
   const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
 
   const loadAlgos = useCallback(async () => {
@@ -103,17 +107,60 @@ export const App = () => {
     }
   };
 
-  const handleDeleteAlgo = async (id: number) => {
-    try {
-      await invoke("delete_algo", { id });
-      if (selectedAlgoId === id) {
-        setSelectedAlgoId(null);
-        setEditorCode(DEFAULT_ALGO);
-      }
-      await loadAlgos();
-    } catch (e) {
-      console.error("Failed to delete algo:", e);
+  const hasUnsavedChanges = selectedAlgo ? editorCode !== selectedAlgo.code : false;
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
+
+  const handleNavigate = (view: View) => {
+    if (view === activeView) return;
+    if (activeView === "editor" && hasUnsavedChanges) {
+      setConfirmDialog({
+        message: "You have unsaved changes. Leave without saving?",
+        confirmLabel: "Leave",
+        onConfirm: () => {
+          if (selectedAlgo) setEditorCode(selectedAlgo.code);
+          setActiveView(view);
+          setConfirmDialog(null);
+        },
+      });
+      return;
     }
+    setActiveView(view);
+  };
+
+  const handleSelectAlgo = (id: number) => {
+    if (id === selectedAlgoId) return;
+    if (hasUnsavedChanges) {
+      setConfirmDialog({
+        message: "You have unsaved changes. Leave without saving?",
+        confirmLabel: "Leave",
+        onConfirm: () => {
+          setSelectedAlgoId(id);
+          setConfirmDialog(null);
+        },
+      });
+      return;
+    }
+    setSelectedAlgoId(id);
+  };
+
+  const handleDeleteAlgo = (id: number) => {
+    setConfirmDialog({
+      message: "Are you sure you want to delete this algo?",
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await invoke("delete_algo", { id });
+          if (selectedAlgoId === id) {
+            setSelectedAlgoId(null);
+            setEditorCode(DEFAULT_ALGO);
+          }
+          await loadAlgos();
+        } catch (e) {
+          console.error("Failed to delete algo:", e);
+        }
+      },
+    });
   };
 
   const handleStartAlgo = async (id: number, mode: "live" | "shadow") => {
@@ -141,7 +188,7 @@ export const App = () => {
       {/* Sidebar Navigation */}
       <Sidebar
         activeView={activeView}
-        onNavigate={setActiveView}
+        onNavigate={handleNavigate}
         connectionStatus={connectionStatus}
       />
 
@@ -151,6 +198,21 @@ export const App = () => {
           connectionStatus={connectionStatus}
           algos={algos}
           activeRuns={activeRuns}
+          stats={simulation.stats}
+        />
+      )}
+
+      {activeView === "editor" && (
+        <EditorView
+          algos={algos}
+          selectedAlgoId={selectedAlgoId}
+          editorCode={editorCode}
+          onSelectAlgo={handleSelectAlgo}
+          onCreateAlgo={handleCreateAlgo}
+          onDeleteAlgo={handleDeleteAlgo}
+          onRenameAlgo={handleRenameAlgo}
+          onEditorChange={setEditorCode}
+          onSaveAlgo={handleSaveAlgo}
         />
       )}
 
@@ -158,23 +220,25 @@ export const App = () => {
         <AlgosView
           algos={algos}
           activeRuns={activeRuns}
-          selectedAlgoId={selectedAlgoId}
-          editorCode={editorCode}
-          onSelectAlgo={setSelectedAlgoId}
-          onCreateAlgo={handleCreateAlgo}
-          onDeleteAlgo={handleDeleteAlgo}
-          onRenameAlgo={handleRenameAlgo}
+          algoStats={simulation.algoStats}
           onStartAlgo={handleStartAlgo}
           onStopAlgo={handleStopAlgo}
-          onEditorChange={setEditorCode}
-          onSaveAlgo={handleSaveAlgo}
         />
       )}
 
       {activeView === "trading" && (
-        <TradingView connectionStatus={connectionStatus} />
+        <TradingView simulation={simulation} />
       )}
       </div>
+
+      {confirmDialog !== null && (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
     </div>
   );
 };

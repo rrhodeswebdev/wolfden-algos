@@ -9,13 +9,31 @@ type Algo = {
   name: string;
 };
 
+type SessionStats = {
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+  winRate: number;
+  totalTrades: number;
+  maxDrawdown: number;
+  sharpe: string;
+};
+
 type HomeViewProps = {
   connectionStatus: "waiting" | "connected" | "error";
   algos: Algo[];
   activeRuns: AlgoRun[];
+  stats: SessionStats;
 };
 
-export const HomeView = ({ connectionStatus, algos, activeRuns }: HomeViewProps) => {
+const formatPnl = (value: number) => {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}$${Math.abs(value).toFixed(2)}`;
+};
+
+export const HomeView = ({ connectionStatus, algos, activeRuns, stats }: HomeViewProps) => {
+  const hasActivity = activeRuns.length > 0;
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Hero Header */}
@@ -59,20 +77,31 @@ export const HomeView = ({ connectionStatus, algos, activeRuns }: HomeViewProps)
           </h2>
 
           <div className="space-y-3">
-            <StatRow label="Total P&L" value="$0.00" />
-            <StatRow label="Realized" value="$0.00" />
-            <StatRow label="Unrealized" value="$0.00" />
+            <StatRow
+              label="Total P&L"
+              value={hasActivity ? formatPnl(stats.totalPnl) : "$0.00"}
+              color={hasActivity ? (stats.totalPnl >= 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]") : undefined}
+            />
+            <StatRow
+              label="Realized"
+              value={hasActivity ? formatPnl(stats.realizedPnl) : "$0.00"}
+              color={hasActivity ? (stats.realizedPnl >= 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]") : undefined}
+            />
+            <StatRow
+              label="Unrealized"
+              value={hasActivity ? formatPnl(stats.unrealizedPnl) : "$0.00"}
+              color={hasActivity ? (stats.unrealizedPnl >= 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]") : undefined}
+            />
             <div className="border-t border-[var(--border)]" />
-            <StatRow label="Win Rate" value="--" />
-            <StatRow label="Trades" value="0" />
-            <StatRow label="Max Drawdown" value="--" />
-            <StatRow label="Sharpe Ratio" value="--" />
+            <StatRow label="Win Rate" value={hasActivity && stats.totalTrades > 0 ? `${stats.winRate}%` : "--"} />
+            <StatRow label="Trades" value={`${stats.totalTrades}`} />
+            <StatRow label="Max Drawdown" value={hasActivity && stats.totalTrades > 0 ? `$${Math.abs(Math.round(stats.maxDrawdown)).toLocaleString()}` : "--"} />
+            <StatRow label="Sharpe Ratio" value={stats.sharpe} />
           </div>
         </div>
 
         {/* Right Column: Active Algos */}
         <div className="flex-1 flex flex-col p-5 overflow-auto">
-          {/* Active Algos */}
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-4">
             Active Algos
           </h2>
@@ -80,7 +109,7 @@ export const HomeView = ({ connectionStatus, algos, activeRuns }: HomeViewProps)
           <div className="flex-1 min-h-0">
             {activeRuns.length === 0 ? (
               <p className="text-sm text-[var(--text-secondary)]">
-                No algos running — start one from Algo Management
+                No algos running — start one from the Algos view
               </p>
             ) : (
               <div className="space-y-2">
@@ -117,16 +146,15 @@ export const HomeView = ({ connectionStatus, algos, activeRuns }: HomeViewProps)
               </div>
             )}
           </div>
-
         </div>
       </div>
     </div>
   );
 };
 
-const StatRow = ({ label, value }: { label: string; value: string }) => (
+const StatRow = ({ label, value, color }: { label: string; value: string; color?: string }) => (
   <div className="flex items-center justify-between">
     <span className="text-sm text-[var(--text-secondary)]">{label}</span>
-    <span className="text-sm font-semibold">{value}</span>
+    <span className={`text-sm font-semibold ${color ?? ""}`}>{value}</span>
   </div>
 );
