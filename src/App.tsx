@@ -25,6 +25,7 @@ type AlgoRun = {
   algo_id: number;
   status: string;
   mode: string;
+  account: string;
 };
 
 type View = "home" | "editor" | "algos" | "trading";
@@ -163,19 +164,19 @@ export const App = () => {
     });
   };
 
-  const handleStartAlgo = async (id: number, mode: "live" | "shadow") => {
+  const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string) => {
     try {
       await invoke("start_algo", { algoId: id, mode });
-      setActiveRuns((prev) => [...prev, { algo_id: id, status: "running", mode }]);
+      setActiveRuns((prev) => [...prev, { algo_id: id, status: "running", mode, account }]);
     } catch (e) {
       console.error("Failed to start algo:", e);
     }
   };
 
-  const handleStopAlgo = async (id: number) => {
+  const handleStopAlgo = async (id: number, account: string) => {
     try {
       await invoke("stop_algo", { algoId: id });
-      setActiveRuns((prev) => prev.filter((r) => r.algo_id !== id));
+      setActiveRuns((prev) => prev.filter((r) => !(r.algo_id === id && r.account === account)));
     } catch (e) {
       console.error("Failed to stop algo:", e);
     }
@@ -227,7 +228,7 @@ export const App = () => {
       )}
 
       {activeView === "trading" && (
-        <TradingView simulation={simulation} />
+        <TradingView simulation={simulation} algos={algos} activeRuns={activeRuns} />
       )}
       </div>
 
