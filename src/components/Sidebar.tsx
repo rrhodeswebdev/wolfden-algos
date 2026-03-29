@@ -37,7 +37,7 @@ export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarPro
     <div className="flex flex-col w-20 bg-[var(--bg-secondary)] border-r border-[var(--border)] select-none">
       {/* Logo */}
       <div className="flex items-center justify-center h-20 border-b border-[var(--border)] p-1">
-        <img src="/logo.svg" alt="Wolf Den" className="w-full h-full object-contain" />
+        <img src="/wolf-den-logo.svg" alt="Wolf Den" className="w-full h-full object-contain" />
       </div>
 
       {/* Nav Items */}
