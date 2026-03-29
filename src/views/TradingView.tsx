@@ -1,8 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { type TradingSimulation, type Position, formatPrice } from "../hooks/useTradingSimulation";
 
+type Algo = {
+  id: number;
+  name: string;
+};
+
+type AlgoRun = {
+  algo_id: number;
+  status: string;
+  mode: string;
+  account: string;
+};
+
 type TradingViewProps = {
   simulation: TradingSimulation;
+  algos: Algo[];
+  activeRuns: AlgoRun[];
 };
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -76,19 +90,176 @@ const useAnimatedNumber = (target: number, speed = 0.08) => {
   return display;
 };
 
-export const TradingView = ({ simulation }: TradingViewProps) => {
-  const { positions, orders, pnlHistory, stats } = simulation;
+export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps) => {
+  const { positions, orders, pnlHistory, runPnlHistories, stats } = simulation;
+  const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
 
-  const smoothedPositions = useSmoothedPositions(positions);
+  // Clear algo selection if the selected algo stops running
+  useEffect(() => {
+    if (selectedAlgoId !== null && !activeRuns.some((r) => r.algo_id === selectedAlgoId)) {
+      setSelectedAlgoId(null);
+    }
+  }, [activeRuns, selectedAlgoId]);
 
-  const animatedRealized = useAnimatedNumber(stats.realizedPnl);
-  const animatedUnrealized = useAnimatedNumber(stats.unrealizedPnl);
-  const animatedTotal = useAnimatedNumber(stats.totalPnl);
+  const runningAlgos = algos.filter((a) => activeRuns.some((r) => r.algo_id === a.id));
+
+  // Derive active accounts from positions/orders
+  const activeAccounts = [...new Set([
+    ...positions.map((p) => p.account),
+    ...orders.map((o) => o.account),
+  ])].sort();
+
+  // Filter data based on both selections
+  const applyFilters = <T extends { algoId: number; account: string }>(items: T[]): T[] => {
+    let result = items;
+    if (selectedAlgoId !== null) result = result.filter((i) => i.algoId === selectedAlgoId);
+    if (selectedAccount !== null) result = result.filter((i) => i.account === selectedAccount);
+    return result;
+  };
+
+  const filteredPositions = applyFilters(positions);
+  const filteredOrders = applyFilters(orders);
+
+  // P&L history: sum relevant run histories based on filters
+  const filteredPnlHistory = (() => {
+    if (selectedAlgoId === null && selectedAccount === null) return pnlHistory;
+
+    // Find matching run keys
+    const matchingKeys = Object.keys(runPnlHistories).filter((key) => {
+      const [idStr, account] = key.split(":");
+      const algoId = parseInt(idStr);
+      if (selectedAlgoId !== null && algoId !== selectedAlgoId) return false;
+      if (selectedAccount !== null && account !== selectedAccount) return false;
+      return true;
+    });
+
+    if (matchingKeys.length === 0) return [0];
+
+    // Sum the matching histories point by point
+    const maxLen = Math.max(...matchingKeys.map((k) => runPnlHistories[k].length));
+    const summed: number[] = [];
+    for (let i = 0; i < maxLen; i++) {
+      let sum = 0;
+      for (const key of matchingKeys) {
+        const hist = runPnlHistories[key];
+        sum += hist[i] ?? (hist[hist.length - 1] ?? 0);
+      }
+      summed.push(Math.round(sum * 100) / 100);
+    }
+    return summed;
+  })();
+
+  // Compute filtered stats
+  const hasFilters = selectedAlgoId !== null || selectedAccount !== null;
+  const filteredStats = hasFilters
+    ? (() => {
+        const fp = filteredPositions;
+        const fo = filteredOrders.filter((o) => o.status === "Filled");
+        const ph = filteredPnlHistory;
+        const realizedPnl = ph[ph.length - 1] ?? 0;
+        const unrealizedPnl = fp.reduce((sum, p) => sum + p.targetPnl, 0);
+        const totalTrades = fo.length;
+        const wins = Math.ceil(totalTrades * 0.58);
+        const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 100) : 0;
+        const maxDrawdown = ph.length > 0 ? Math.min(...ph, 0) : 0;
+        const sharpe = ph.length > 2
+          ? (() => {
+              const returns = ph.slice(1).map((v, i) => v - ph[i]);
+              const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+              const std = Math.sqrt(returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length);
+              return std > 0 ? (mean / std).toFixed(2) : "--";
+            })()
+          : "--";
+        return { realizedPnl, unrealizedPnl, totalPnl: realizedPnl + unrealizedPnl, winRate, totalTrades, maxDrawdown, sharpe };
+      })()
+    : stats;
+
+  const smoothedPositions = useSmoothedPositions(filteredPositions);
+
+  const animatedRealized = useAnimatedNumber(filteredStats.realizedPnl);
+  const animatedUnrealized = useAnimatedNumber(filteredStats.unrealizedPnl);
+  const animatedTotal = useAnimatedNumber(filteredStats.totalPnl);
 
   const hasActivity = positions.length > 0 || orders.length > 0;
 
   return (
     <div className="flex-1 flex flex-col gap-3 p-4 overflow-hidden">
+      {/* View-Level Filters */}
+      {(runningAlgos.length > 0 || activeAccounts.length > 0) && (
+        <div className="flex items-center gap-4 px-2">
+          {/* Account Filters */}
+          {activeAccounts.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mr-1">Account</span>
+              <button
+                onClick={() => setSelectedAccount(null)}
+                className={`px-3 py-1.5 text-[11px] rounded-md transition-colors ${
+                  selectedAccount === null
+                    ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                }`}
+              >
+                All
+              </button>
+              {activeAccounts.map((account) => (
+                <button
+                  key={account}
+                  onClick={() => setSelectedAccount(account === selectedAccount ? null : account)}
+                  className={`px-3 py-1.5 text-[11px] rounded-md transition-colors ${
+                    selectedAccount === account
+                      ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                  }`}
+                >
+                  {account}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Divider */}
+          {activeAccounts.length > 0 && runningAlgos.length > 0 && (
+            <div className="w-px h-5 bg-[var(--border)]" />
+          )}
+
+          {/* Algo Filters */}
+          {runningAlgos.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mr-1">Algo</span>
+              <button
+                onClick={() => setSelectedAlgoId(null)}
+                className={`px-3 py-1.5 text-[11px] rounded-md transition-colors ${
+                  selectedAlgoId === null
+                    ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                }`}
+              >
+                All
+              </button>
+              {runningAlgos.map((algo) => {
+                const run = activeRuns.find((r) => r.algo_id === algo.id);
+                const modeColor = run?.mode === "live" ? "accent-green" : "accent-yellow";
+                return (
+                  <button
+                    key={algo.id}
+                    onClick={() => setSelectedAlgoId(algo.id === selectedAlgoId ? null : algo.id)}
+                    className={`px-3 py-1.5 text-[11px] rounded-md transition-colors flex items-center gap-1.5 ${
+                      selectedAlgoId === algo.id
+                        ? `bg-[var(--${modeColor})]/15 text-[var(--${modeColor})]`
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full bg-[var(--${modeColor})]`} />
+                    {algo.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Top Row: P&L + Stats */}
       <div className="flex gap-3">
         <div className="flex-1 grid grid-cols-3 gap-4 p-4 bg-[var(--bg-panel)] rounded-lg">
@@ -97,10 +268,10 @@ export const TradingView = ({ simulation }: TradingViewProps) => {
           <PnlCard label="Total P&L" value={animatedTotal} />
         </div>
         <div className="flex-1 grid grid-cols-4 gap-4 p-4 bg-[var(--bg-panel)] rounded-lg">
-          <StatCell label="Win Rate" value={stats.totalTrades > 0 ? `${stats.winRate}%` : "--"} />
-          <StatCell label="Trades" value={`${stats.totalTrades}`} />
-          <StatCell label="Drawdown" value={stats.totalTrades > 0 ? `$${Math.abs(Math.round(stats.maxDrawdown)).toLocaleString()}` : "--"} />
-          <StatCell label="Sharpe" value={stats.sharpe} />
+          <StatCell label="Win Rate" value={filteredStats.totalTrades > 0 ? `${filteredStats.winRate}%` : "--"} />
+          <StatCell label="Trades" value={`${filteredStats.totalTrades}`} />
+          <StatCell label="Drawdown" value={filteredStats.totalTrades > 0 ? `$${Math.abs(Math.round(filteredStats.maxDrawdown)).toLocaleString()}` : "--"} />
+          <StatCell label="Sharpe" value={filteredStats.sharpe} />
         </div>
       </div>
 
@@ -108,17 +279,11 @@ export const TradingView = ({ simulation }: TradingViewProps) => {
       <div className="flex-1 bg-[var(--bg-panel)] rounded-lg p-4 flex flex-col min-h-0">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-            P&L Chart
+            Session P&L
           </h2>
-          <div className="flex gap-1.5">
-            <TimeButton label="1H" />
-            <TimeButton label="4H" />
-            <TimeButton label="1D" active />
-            <TimeButton label="1W" />
-          </div>
         </div>
-        {pnlHistory.length > 1 ? (
-          <PnlChart data={pnlHistory} />
+        {filteredPnlHistory.length > 1 ? (
+          <PnlChart data={filteredPnlHistory} />
         ) : (
           <div className="flex-1 flex items-center justify-center text-sm text-[var(--text-secondary)] border border-dashed border-[var(--border)] rounded-lg">
             Start an algo to see live P&L
@@ -144,12 +309,13 @@ export const TradingView = ({ simulation }: TradingViewProps) => {
                   <th className="text-right px-4 py-2.5 font-medium">Avg Price</th>
                   <th className="text-right px-4 py-2.5 font-medium">P&L</th>
                   <th className="text-left px-4 py-2.5 font-medium">Algo</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Account</th>
                 </tr>
               </thead>
               <tbody>
                 {smoothedPositions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-5 text-center text-[var(--text-secondary)]">
+                    <td colSpan={7} className="px-4 py-5 text-center text-[var(--text-secondary)]">
                       {hasActivity ? "No open positions" : "Start an algo to see positions"}
                     </td>
                   </tr>
@@ -166,6 +332,7 @@ export const TradingView = ({ simulation }: TradingViewProps) => {
                         {p.pnl >= 0 ? "+" : ""}{p.pnl.toFixed(2)}
                       </td>
                       <td className="px-4 py-2.5 text-[var(--text-secondary)]">{p.algo}</td>
+                      <td className="px-4 py-2.5 text-[var(--text-secondary)]">{p.account}</td>
                     </tr>
                   ))
                 )}
@@ -191,17 +358,18 @@ export const TradingView = ({ simulation }: TradingViewProps) => {
                   <th className="text-right px-4 py-2.5 font-medium">Price</th>
                   <th className="text-left px-4 py-2.5 font-medium">Status</th>
                   <th className="text-left px-4 py-2.5 font-medium">Algo</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Account</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.length === 0 ? (
+                {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-5 text-center text-[var(--text-secondary)]">
+                    <td colSpan={8} className="px-4 py-5 text-center text-[var(--text-secondary)]">
                       No orders yet
                     </td>
                   </tr>
                 ) : (
-                  orders.map((o) => (
+                  filteredOrders.map((o) => (
                     <tr key={o.id} className="border-b border-[var(--border)] last:border-0">
                       <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.time}</td>
                       <td className="px-4 py-2.5 font-medium">{o.symbol}</td>
@@ -222,6 +390,7 @@ export const TradingView = ({ simulation }: TradingViewProps) => {
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.algo}</td>
+                      <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.account}</td>
                     </tr>
                   ))
                 )}
@@ -257,17 +426,6 @@ const StatCell = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-const TimeButton = ({ label, active }: { label: string; active?: boolean }) => (
-  <button
-    className={`px-2.5 py-1 text-[11px] rounded-md transition-colors ${
-      active
-        ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
-        : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
-    }`}
-  >
-    {label}
-  </button>
-);
 
 const PnlChart = ({ data }: { data: number[] }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -275,10 +433,31 @@ const PnlChart = ({ data }: { data: number[] }) => {
   const animatedDataRef = useRef<number[]>(data);
   const rafRef = useRef<number>(0);
   const targetDataRef = useRef<number[]>(data);
+  const mouseRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     targetDataRef.current = data;
   }, [data]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    const handleLeave = () => {
+      mouseRef.current = null;
+    };
+
+    canvas.addEventListener("mousemove", handleMove);
+    canvas.addEventListener("mouseleave", handleLeave);
+    return () => {
+      canvas.removeEventListener("mousemove", handleMove);
+      canvas.removeEventListener("mouseleave", handleLeave);
+    };
+  }, []);
 
   const drawFrame = useCallback(() => {
     const canvas = canvasRef.current;
@@ -338,17 +517,6 @@ const PnlChart = ({ data }: { data: number[] }) => {
     ctx.setLineDash([]);
 
     const lastVal = animData[animData.length - 1];
-    const isPositive = lastVal >= 0;
-    const lineColor = isPositive ? "#00d68f" : "#ff4d6a";
-
-    const gradient = ctx.createLinearGradient(0, 0, 0, h);
-    if (isPositive) {
-      gradient.addColorStop(0, "rgba(0, 214, 143, 0.15)");
-      gradient.addColorStop(1, "rgba(0, 214, 143, 0)");
-    } else {
-      gradient.addColorStop(0, "rgba(255, 77, 106, 0)");
-      gradient.addColorStop(1, "rgba(255, 77, 106, 0.15)");
-    }
 
     const tension = 0.3;
     const getControlPoints = (i: number) => {
@@ -365,46 +533,150 @@ const PnlChart = ({ data }: { data: number[] }) => {
       return { cp1x, cp1y, cp2x, cp2y };
     };
 
-    // Fill area
-    ctx.beginPath();
-    ctx.moveTo(toX(0), zeroY);
-    ctx.lineTo(toX(0), toY(animData[0]));
-    for (let i = 0; i < animData.length - 1; i++) {
-      const { cp1x, cp1y, cp2x, cp2y } = getControlPoints(i);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, toX(i + 1), toY(animData[i + 1]));
+    // Build the curve path as a reusable function
+    const traceCurve = () => {
+      ctx.moveTo(toX(0), toY(animData[0]));
+      for (let i = 0; i < animData.length - 1; i++) {
+        const { cp1x, cp1y, cp2x, cp2y } = getControlPoints(i);
+        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, toX(i + 1), toY(animData[i + 1]));
+      }
+    };
+
+    // Draw fill and line for each region using clipping
+    const regions: { clipY: number; clipH: number; color: string; gradientStops: [string, string] }[] = [
+      {
+        clipY: 0,
+        clipH: zeroY,
+        color: "#00d68f",
+        gradientStops: ["rgba(0, 214, 143, 0.2)", "rgba(0, 214, 143, 0)"],
+      },
+      {
+        clipY: zeroY,
+        clipH: h - zeroY,
+        color: "#ff4d6a",
+        gradientStops: ["rgba(255, 77, 106, 0)", "rgba(255, 77, 106, 0.2)"],
+      },
+    ];
+
+    for (const region of regions) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, region.clipY, w, region.clipH);
+      ctx.clip();
+
+      // Fill
+      const grad = ctx.createLinearGradient(0, region.clipY, 0, region.clipY + region.clipH);
+      grad.addColorStop(0, region.gradientStops[0]);
+      grad.addColorStop(1, region.gradientStops[1]);
+
+      ctx.beginPath();
+      ctx.moveTo(toX(0), zeroY);
+      traceCurve();
+      ctx.lineTo(toX(animData.length - 1), zeroY);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Line
+      ctx.beginPath();
+      traceCurve();
+      ctx.strokeStyle = region.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.restore();
     }
-    ctx.lineTo(toX(animData.length - 1), zeroY);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
 
-    // Line
-    ctx.beginPath();
-    ctx.moveTo(toX(0), toY(animData[0]));
-    for (let i = 0; i < animData.length - 1; i++) {
-      const { cp1x, cp1y, cp2x, cp2y } = getControlPoints(i);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, toX(i + 1), toY(animData[i + 1]));
+    // Hover crosshair + tooltip
+    const mouse = mouseRef.current;
+    if (mouse) {
+      // Find nearest data index
+      const idx = Math.round((mouse.x / w) * (animData.length - 1));
+      const clampedIdx = Math.max(0, Math.min(animData.length - 1, idx));
+      const val = animData[clampedIdx];
+      const pointX = toX(clampedIdx);
+      const pointY = toY(val);
+      const valColor = val >= 0 ? "#00d68f" : "#ff4d6a";
+
+      // Vertical crosshair line
+      ctx.strokeStyle = "rgba(136, 136, 160, 0.3)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(pointX, 0);
+      ctx.lineTo(pointX, h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Horizontal crosshair line
+      ctx.strokeStyle = "rgba(136, 136, 160, 0.2)";
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, pointY);
+      ctx.lineTo(w, pointY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Dot on the line
+      ctx.beginPath();
+      ctx.arc(pointX, pointY, 5, 0, Math.PI * 2);
+      ctx.fillStyle = valColor;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(pointX, pointY, 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#1a1a28";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Tooltip
+      const label = `${val >= 0 ? "+" : ""}$${Math.abs(val).toFixed(2)}`;
+      ctx.font = "bold 12px -apple-system, BlinkMacSystemFont, sans-serif";
+      const metrics = ctx.measureText(label);
+      const tooltipW = metrics.width + 16;
+      const tooltipH = 24;
+      const tooltipPad = 10;
+
+      // Position tooltip to avoid edges
+      let tx = pointX + tooltipPad;
+      if (tx + tooltipW > w) tx = pointX - tooltipW - tooltipPad;
+      let ty = pointY - tooltipH - tooltipPad;
+      if (ty < 0) ty = pointY + tooltipPad;
+
+      // Background
+      ctx.fillStyle = "rgba(26, 26, 40, 0.92)";
+      ctx.beginPath();
+      ctx.roundRect(tx, ty, tooltipW, tooltipH, 4);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(42, 42, 58, 0.8)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Text
+      ctx.fillStyle = valColor;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, tx + tooltipW / 2, ty + tooltipH / 2);
     }
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 2;
-    ctx.stroke();
 
-    // Pulsing dot
-    const lastX = toX(animData.length - 1);
-    const lastY = toY(lastVal);
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = lineColor;
-    ctx.fill();
+    // Pulsing dot (only when not hovering)
+    if (!mouse) {
+      const lastX = toX(animData.length - 1);
+      const lastY = toY(lastVal);
+      const dotColor = lastVal >= 0 ? "#00d68f" : "#ff4d6a";
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = dotColor;
+      ctx.fill();
 
-    const pulse = 0.3 + Math.sin(Date.now() / 400) * 0.2;
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 8, 0, Math.PI * 2);
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = pulse;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+      const pulse = 0.3 + Math.sin(Date.now() / 400) * 0.2;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 8, 0, Math.PI * 2);
+      ctx.strokeStyle = dotColor;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = pulse;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     rafRef.current = requestAnimationFrame(drawFrame);
   }, []);
@@ -416,7 +688,7 @@ const PnlChart = ({ data }: { data: number[] }) => {
 
   return (
     <div ref={containerRef} className="flex-1 min-h-0">
-      <canvas ref={canvasRef} className="w-full h-full" />
+      <canvas ref={canvasRef} className="w-full h-full" style={{ cursor: "crosshair" }} />
     </div>
   );
 };
