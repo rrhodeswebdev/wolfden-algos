@@ -1,6 +1,6 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-type View = "home" | "algos" | "trading";
+type View = "home" | "editor" | "algos" | "trading";
 
 type SidebarProps = {
   activeView: View;
@@ -10,7 +10,8 @@ type SidebarProps = {
 
 const NAV_ITEMS: { view: View; label: string; icon: string }[] = [
   { view: "home", label: "Home", icon: "⌂" },
-  { view: "algos", label: "Algos", icon: "λ" },
+  { view: "editor", label: "Editor", icon: "λ" },
+  { view: "algos", label: "Algos", icon: "▶" },
   { view: "trading", label: "Trading", icon: "⇅" },
 ];
 
