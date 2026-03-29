@@ -1,4 +1,5 @@
-import { type AlgoStats } from "../hooks/useTradingSimulation";
+import { useState } from "react";
+import { type AlgoStats, ACCOUNTS } from "../hooks/useTradingSimulation";
 
 type Algo = {
   id: number;
@@ -15,19 +16,15 @@ type AlgoRun = {
   algo_id: number;
   status: string;
   mode: string;
+  account: string;
 };
 
 type AlgosViewProps = {
   algos: Algo[];
   activeRuns: AlgoRun[];
   algoStats: Record<number, AlgoStats>;
-  onStartAlgo: (id: number, mode: "live" | "shadow") => void;
-  onStopAlgo: (id: number) => void;
-};
-
-type AlgoWithRun = {
-  algo: Algo;
-  run: AlgoRun | undefined;
+  onStartAlgo: (id: number, mode: "live" | "shadow", account: string) => void;
+  onStopAlgo: (id: number, account: string) => void;
 };
 
 const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
@@ -54,51 +51,105 @@ const PerformanceStats = ({ stats }: { stats: AlgoStats }) => {
   );
 };
 
-const AlgoRow = ({
+const AvailableAlgoRow = ({
+  algo,
+  availableAccounts,
+  onStartAlgo,
+}: {
+  algo: Algo;
+  availableAccounts: string[];
+  onStartAlgo: (id: number, mode: "live" | "shadow", account: string) => void;
+}) => {
+  const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set([availableAccounts[0]]));
+
+  // Keep selection in sync — remove accounts that are no longer available
+  const validSelected = new Set([...selectedAccounts].filter((a) => availableAccounts.includes(a)));
+  if (validSelected.size === 0 && availableAccounts.length > 0) {
+    validSelected.add(availableAccounts[0]);
+  }
+
+  const toggleAccount = (account: string) => {
+    const next = new Set(validSelected);
+    if (next.has(account)) {
+      if (next.size > 1) next.delete(account);
+    } else {
+      next.add(account);
+    }
+    setSelectedAccounts(next);
+  };
+
+  const startOnSelected = (mode: "live" | "shadow") => {
+    for (const account of validSelected) {
+      onStartAlgo(algo.id, mode, account);
+    }
+  };
+
+  return (
+    <div className="px-6 py-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium">{algo.name}</div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => startOnSelected("shadow")}
+            className="px-4 py-2 text-xs bg-[var(--accent-yellow)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
+          >
+            Shadow
+          </button>
+          <button
+            onClick={() => startOnSelected("live")}
+            className="px-4 py-2 text-xs bg-[var(--accent-green)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
+          >
+            Live
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 mt-3">
+        <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mr-1">Accounts</span>
+        {availableAccounts.map((account) => (
+          <button
+            key={account}
+            onClick={() => toggleAccount(account)}
+            className={`px-3 py-1 text-[11px] rounded-md transition-colors ${
+              validSelected.has(account)
+                ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+                : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] border border-[var(--border)]"
+            }`}
+          >
+            {account}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const RunningAlgoRow = ({
   algo,
   run,
   stats,
-  onStartAlgo,
   onStopAlgo,
-}: AlgoWithRun & {
+}: {
+  algo: Algo;
+  run: AlgoRun;
   stats: AlgoStats | undefined;
-  onStartAlgo: (id: number, mode: "live" | "shadow") => void;
-  onStopAlgo: (id: number) => void;
+  onStopAlgo: (id: number, account: string) => void;
 }) => (
   <div>
     <div className="flex items-center justify-between px-6 py-4">
       <div className="flex items-center gap-4">
         <div>
           <div className="text-sm font-medium">{algo.name}</div>
+          <div className="text-xs text-[var(--text-secondary)] mt-0.5">{run.account}</div>
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        {run ? (
-          <button
-            onClick={() => onStopAlgo(algo.id)}
-            className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
-          >
-            Stop
-          </button>
-        ) : (
-          <>
-            <button
-              onClick={() => onStartAlgo(algo.id, "shadow")}
-              className="px-4 py-2 text-xs bg-[var(--accent-yellow)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
-            >
-              Shadow
-            </button>
-            <button
-              onClick={() => onStartAlgo(algo.id, "live")}
-              className="px-4 py-2 text-xs bg-[var(--accent-green)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
-            >
-              Live
-            </button>
-          </>
-        )}
-      </div>
+      <button
+        onClick={() => onStopAlgo(algo.id, run.account)}
+        className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
+      >
+        Stop
+      </button>
     </div>
-    {run && stats && <PerformanceStats stats={stats} />}
+    {stats && <PerformanceStats stats={stats} />}
   </div>
 );
 
@@ -107,22 +158,34 @@ const Section = ({
   count,
   color,
   children,
+  onStopAll,
 }: {
   title: string;
   count: number;
   color: string;
   children: React.ReactNode;
+  onStopAll?: () => void;
 }) => (
-  <div className="bg-[var(--bg-panel)] rounded-lg overflow-hidden">
-    <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border)]">
-      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${color}`} />
-      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-        {title}
-      </span>
-      <span className="text-xs text-[var(--text-secondary)]">{count}</span>
+  <div className="bg-[var(--bg-panel)] rounded-lg overflow-hidden flex flex-col min-h-0">
+    <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] flex-shrink-0">
+      <div className="flex items-center gap-3">
+        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${color}`} />
+        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+          {title}
+        </span>
+        <span className="text-xs text-[var(--text-secondary)]">{count}</span>
+      </div>
+      {onStopAll && count > 0 && (
+        <button
+          onClick={onStopAll}
+          className="px-3 py-1.5 text-[11px] bg-[var(--accent-red)]/15 text-[var(--accent-red)] rounded-md hover:bg-[var(--accent-red)]/25 transition-colors font-medium"
+        >
+          Stop All
+        </button>
+      )}
     </div>
     {count > 0 ? (
-      <div className="divide-y divide-[var(--border)]">{children}</div>
+      <div className="divide-y divide-[var(--border)] overflow-auto flex-1 min-h-0">{children}</div>
     ) : (
       <div className="px-6 py-4 text-xs text-[var(--text-secondary)]">
         No algos
@@ -138,52 +201,69 @@ export const AlgosView = ({
   onStartAlgo,
   onStopAlgo,
 }: AlgosViewProps) => {
-  const getRunForAlgo = (id: number) => activeRuns.find((r) => r.algo_id === id);
+  const liveRuns = activeRuns.filter((r) => r.mode === "live");
+  const shadowRuns = activeRuns.filter((r) => r.mode === "shadow");
 
-  const liveAlgos = algos.filter((a) => getRunForAlgo(a.id)?.mode === "live");
-  const shadowAlgos = algos.filter((a) => getRunForAlgo(a.id)?.mode === "shadow");
-  const availableAlgos = algos.filter((a) => !getRunForAlgo(a.id));
+  // An algo is "available" if it has at least one account without a run
+  const getAvailableAccounts = (algoId: number) =>
+    ACCOUNTS.filter((account) => !activeRuns.some((r) => r.algo_id === algoId && r.account === account));
+
+  const availableAlgos = algos.filter((a) => getAvailableAccounts(a.id).length > 0);
 
   return (
-    <div className="flex-1 flex flex-col gap-4 p-4 overflow-auto">
+    <div className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
       <Section title="Available" count={availableAlgos.length} color="bg-[var(--accent-blue)]">
         {availableAlgos.map((algo) => (
-          <AlgoRow
+          <AvailableAlgoRow
             key={algo.id}
             algo={algo}
-            run={getRunForAlgo(algo.id)}
-            stats={algoStats[algo.id]}
+            availableAccounts={getAvailableAccounts(algo.id)}
             onStartAlgo={onStartAlgo}
-            onStopAlgo={onStopAlgo}
           />
         ))}
       </Section>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Section title="Shadow" count={shadowAlgos.length} color="bg-[var(--accent-yellow)]">
-          {shadowAlgos.map((algo) => (
-            <AlgoRow
-              key={algo.id}
-              algo={algo}
-              run={getRunForAlgo(algo.id)}
-              stats={algoStats[algo.id]}
-              onStartAlgo={onStartAlgo}
-              onStopAlgo={onStopAlgo}
-            />
-          ))}
+      <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+        <Section
+          title="Shadow"
+          count={shadowRuns.length}
+          color="bg-[var(--accent-yellow)]"
+          onStopAll={() => shadowRuns.forEach((r) => onStopAlgo(r.algo_id, r.account))}
+        >
+          {shadowRuns.map((run) => {
+            const algo = algos.find((a) => a.id === run.algo_id);
+            if (!algo) return null;
+            return (
+              <RunningAlgoRow
+                key={`${run.algo_id}:${run.account}`}
+                algo={algo}
+                run={run}
+                stats={algoStats[run.algo_id]}
+                onStopAlgo={onStopAlgo}
+              />
+            );
+          })}
         </Section>
 
-        <Section title="Live" count={liveAlgos.length} color="bg-[var(--accent-green)]">
-          {liveAlgos.map((algo) => (
-            <AlgoRow
-              key={algo.id}
-              algo={algo}
-              run={getRunForAlgo(algo.id)}
-              stats={algoStats[algo.id]}
-              onStartAlgo={onStartAlgo}
-              onStopAlgo={onStopAlgo}
-            />
-          ))}
+        <Section
+          title="Live"
+          count={liveRuns.length}
+          color="bg-[var(--accent-green)]"
+          onStopAll={() => liveRuns.forEach((r) => onStopAlgo(r.algo_id, r.account))}
+        >
+          {liveRuns.map((run) => {
+            const algo = algos.find((a) => a.id === run.algo_id);
+            if (!algo) return null;
+            return (
+              <RunningAlgoRow
+                key={`${run.algo_id}:${run.account}`}
+                algo={algo}
+                run={run}
+                stats={algoStats[run.algo_id]}
+                onStopAlgo={onStopAlgo}
+              />
+            );
+          })}
         </Section>
       </div>
     </div>
