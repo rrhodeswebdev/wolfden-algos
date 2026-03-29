@@ -200,6 +200,7 @@ export const App = () => {
           algos={algos}
           activeRuns={activeRuns}
           stats={simulation.stats}
+          positions={simulation.positions}
         />
       )}
 

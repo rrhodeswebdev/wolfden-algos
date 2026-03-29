@@ -37,7 +37,7 @@ export type SimOrder = {
   account: string;
 };
 
-export const ACCOUNTS = ["Sim101", "APEX-PA1", "APEX-PA2", "Topstep-1", "Topstep-2"] as const;
+export const ACCOUNTS = ["Demo-1", "Demo-2", "Demo-3", "Demo-4", "Demo-5"] as const;
 
 export type AlgoStats = {
   totalTrades: number;

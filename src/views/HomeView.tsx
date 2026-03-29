@@ -10,6 +10,18 @@ type Algo = {
   name: string;
 };
 
+type Position = {
+  symbol: string;
+  side: "Long" | "Short";
+  qty: number;
+  avgPrice: number;
+  pnl: number;
+  targetPnl: number;
+  algo: string;
+  algoId: number;
+  account: string;
+};
+
 type SessionStats = {
   realizedPnl: number;
   unrealizedPnl: number;
@@ -36,18 +48,15 @@ type Account = {
   name: string;
   broker: string;
   balance: number;
-  dayPnl: number;
-  openPositions: number;
-  status: "active" | "inactive";
 };
 
 // Dummy accounts — will be replaced with real NinjaTrader account data
 const DUMMY_ACCOUNTS: Account[] = [
-  { id: "sim101", name: "Sim101", broker: "NinjaTrader", balance: 100000.00, dayPnl: 1245.50, openPositions: 3, status: "active" },
-  { id: "apex-pa1", name: "APEX-PA1", broker: "Apex Trader", balance: 50000.00, dayPnl: -320.75, openPositions: 1, status: "active" },
-  { id: "apex-pa2", name: "APEX-PA2", broker: "Apex Trader", balance: 50000.00, dayPnl: 580.25, openPositions: 2, status: "active" },
-  { id: "topstep-1", name: "Topstep-1", broker: "Topstep", balance: 150000.00, dayPnl: 2100.00, openPositions: 4, status: "active" },
-  { id: "topstep-2", name: "Topstep-2", broker: "Topstep", balance: 150000.00, dayPnl: -85.50, openPositions: 0, status: "inactive" },
+  { id: "demo-1", name: "Demo-1", broker: "NinjaTrader", balance: 100000.00 },
+  { id: "demo-2", name: "Demo-2", broker: "NinjaTrader", balance: 50000.00 },
+  { id: "demo-3", name: "Demo-3", broker: "NinjaTrader", balance: 50000.00 },
+  { id: "demo-4", name: "Demo-4", broker: "NinjaTrader", balance: 150000.00 },
+  { id: "demo-5", name: "Demo-5", broker: "NinjaTrader", balance: 150000.00 },
 ];
 
 type HomeViewProps = {
@@ -55,6 +64,7 @@ type HomeViewProps = {
   algos: Algo[];
   activeRuns: AlgoRun[];
   stats: SessionStats;
+  positions: Position[];
 };
 
 const formatPnl = (value: number) => {
@@ -65,9 +75,20 @@ const formatPnl = (value: number) => {
 const pnlColor = (value: number) =>
   value >= 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]";
 
-export const HomeView = ({ connectionStatus, algos, activeRuns, stats }: HomeViewProps) => {
+export const HomeView = ({ connectionStatus, algos, activeRuns, stats, positions }: HomeViewProps) => {
   const hasActivity = activeRuns.length > 0;
   const t = stats.totalTrades;
+
+  const accountPositionCount = (accountName: string) =>
+    positions.filter((p) => p.account === accountName).length;
+
+  const accountPnl = (accountName: string) =>
+    positions.filter((p) => p.account === accountName).reduce((sum, p) => sum + p.targetPnl, 0);
+
+  const accountRunCount = (accountName: string) =>
+    activeRuns.filter((r) => r.account === accountName).length;
+
+  const isAccountActive = (accountName: string) => accountRunCount(accountName) > 0;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -121,7 +142,7 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, stats }: HomeVie
                   <div className="flex items-center gap-2">
                     <div
                       className={`w-2 h-2 rounded-full ${
-                        account.status === "active"
+                        isAccountActive(account.name)
                           ? "bg-[var(--accent-green)]"
                           : "bg-[var(--border)]"
                       }`}
@@ -136,17 +157,22 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, stats }: HomeVie
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Balance</div>
-                    <div className="text-sm font-medium">${account.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                    <div className="text-sm font-medium">${(account.balance + accountPnl(account.name)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Day P&L</div>
-                    <div className={`text-sm font-medium ${account.dayPnl !== 0 ? pnlColor(account.dayPnl) : ""}`}>
-                      {account.dayPnl !== 0 ? formatPnl(account.dayPnl) : "$0.00"}
-                    </div>
+                    {(() => {
+                      const pnl = accountPnl(account.name);
+                      return (
+                        <div className={`text-sm font-medium ${pnl !== 0 ? pnlColor(pnl) : ""}`}>
+                          {pnl !== 0 ? formatPnl(pnl) : "$0.00"}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Positions</div>
-                    <div className="text-sm font-medium">{account.openPositions}</div>
+                    <div className="text-sm font-medium">{accountPositionCount(account.name)}</div>
                   </div>
                 </div>
               </div>
