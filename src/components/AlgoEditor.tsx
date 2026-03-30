@@ -7,31 +7,21 @@ type AlgoEditorProps = {
   onSave: () => void;
 };
 
-const DEFAULT_ALGO = `from typing import NamedTuple
-
-Tick = NamedTuple('Tick', [('symbol', str), ('price', float), ('size', int), ('timestamp', int)])
-Bar = NamedTuple('Bar', [('symbol', str), ('o', float), ('h', float), ('l', float), ('c', float), ('v', int), ('timestamp', int)])
-Fill = NamedTuple('Fill', [('symbol', str), ('side', str), ('qty', int), ('price', float)])
-Order = NamedTuple('Order', [('side', str), ('symbol', str), ('qty', int), ('order_type', str), ('limit_price', float), ('stop_price', float)])
-AlgoResult = NamedTuple('AlgoResult', [('state', dict), ('orders', tuple)])
+const DEFAULT_ALGO = `from wolf_types import AlgoResult, market_buy, market_sell
 
 
 def create_algo():
-    """Return a dict of pure handler functions."""
+    """Return a dict of handler functions."""
 
     def init():
-        return {'prices': (), 'position': 0}
+        return {'prices': ()}
 
-    def on_tick(state, tick: Tick) -> AlgoResult:
-        return AlgoResult(state, ())
+    def on_tick(state, tick, ctx):
+        prices = (*state['prices'], tick.price)[-20:]
+        new_state = {**state, 'prices': prices}
+        return AlgoResult(new_state, ())
 
-    def on_bar(state, bar: Bar) -> AlgoResult:
-        return AlgoResult(state, ())
-
-    def on_fill(state, fill: Fill) -> AlgoResult:
-        return AlgoResult(state, ())
-
-    return {'init': init, 'on_tick': on_tick, 'on_bar': on_bar, 'on_fill': on_fill}
+    return {'init': init, 'on_tick': on_tick}
 `;
 
 export { DEFAULT_ALGO };
