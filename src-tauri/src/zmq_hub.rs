@@ -1,13 +1,14 @@
 /// ZeroMQ hub for market data fan-out to Python algo processes
 /// and trade signal collection from algo processes.
 ///
-/// PUB socket: publishes market data to algo SUB sockets
-/// PULL socket: collects trade signals from algo PUSH sockets
+/// PUB socket: publishes market data with topic-based routing
+///   - "md:{source_id}:tick" for tick data
+///   - "md:{source_id}:bar" for bar data
+///   - "fill:{instance_id}" for fill notifications
 ///
-/// TODO: Phase 2 implementation
-/// - Initialize PUB socket on ipc:// (Mac/Linux) or tcp://127.0.0.1 (Windows)
-/// - Initialize PULL socket for trade signals
-/// - Bridge between broadcast channels and ZMQ sockets
+/// PULL socket: collects trade signals from algo PUSH sockets
+///   - Validates orders against instance risk limits
+///   - Routes validated orders to the correct WebSocket connection
 
 pub struct ZmqHub {
     pub market_data_addr: String,
@@ -26,5 +27,13 @@ impl ZmqHub {
             market_data_addr: transport.0.to_string(),
             trade_signal_addr: transport.1.to_string(),
         }
+    }
+
+    pub fn market_data_addr(&self) -> &str {
+        &self.market_data_addr
+    }
+
+    pub fn trade_signal_addr(&self) -> &str {
+        &self.trade_signal_addr
     }
 }

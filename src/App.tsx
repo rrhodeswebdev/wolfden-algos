@@ -8,7 +8,7 @@ import { AlgosView } from "./views/AlgosView";
 import { TradingView } from "./views/TradingView";
 import { TitleBar } from "./components/TitleBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { useTradingSimulation } from "./hooks/useTradingSimulation";
+import { useTradingSimulation, DUMMY_DATA_SOURCES } from "./hooks/useTradingSimulation";
 
 type Algo = {
   id: number;
@@ -26,6 +26,8 @@ type AlgoRun = {
   status: string;
   mode: string;
   account: string;
+  data_source_id: string;
+  instance_id: string;
 };
 
 type View = "home" | "editor" | "algos" | "trading";
@@ -39,7 +41,7 @@ export const App = () => {
   const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
-  const simulation = useTradingSimulation(algos, activeRuns);
+  const simulation = useTradingSimulation(algos, activeRuns, DUMMY_DATA_SOURCES);
   const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
 
   const loadAlgos = useCallback(async () => {
@@ -164,19 +166,23 @@ export const App = () => {
     });
   };
 
-  const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string) => {
+  const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => {
     try {
-      await invoke("start_algo", { algoId: id, mode });
-      setActiveRuns((prev) => [...prev, { algo_id: id, status: "running", mode, account }]);
+      const instanceId = crypto.randomUUID();
+      await invoke("start_algo_instance", { instanceId });
+      setActiveRuns((prev) => [...prev, {
+        algo_id: id, status: "running", mode, account,
+        data_source_id: dataSourceId, instance_id: instanceId,
+      }]);
     } catch (e) {
       console.error("Failed to start algo:", e);
     }
   };
 
-  const handleStopAlgo = async (id: number, account: string) => {
+  const handleStopAlgo = async (instanceId: string) => {
     try {
-      await invoke("stop_algo", { algoId: id });
-      setActiveRuns((prev) => prev.filter((r) => !(r.algo_id === id && r.account === account)));
+      await invoke("stop_algo_instance", { instanceId });
+      setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
     } catch (e) {
       console.error("Failed to stop algo:", e);
     }

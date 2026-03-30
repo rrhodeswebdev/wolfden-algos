@@ -1,5 +1,5 @@
 use crate::db::{self, DbState};
-use crate::types::{Algo, AlgoRun, Session, Trade};
+use crate::types::{Algo, AlgoInstance, AlgoRun, DataSource, RiskConfig, Session, Trade};
 
 #[tauri::command]
 pub fn get_algos(state: tauri::State<DbState>) -> Result<Vec<Algo>, String> {
@@ -37,27 +37,6 @@ pub fn delete_algo(state: tauri::State<DbState>, id: i64) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub fn start_algo(
-    _state: tauri::State<DbState>,
-    _algo_id: i64,
-    _mode: String,
-) -> Result<(), String> {
-    // TODO: Phase 2 — spawn Python algo process via process manager
-    log::info!("start_algo called for algo_id={}, mode={}", _algo_id, _mode);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn stop_algo(
-    _state: tauri::State<DbState>,
-    _algo_id: i64,
-) -> Result<(), String> {
-    // TODO: Phase 2 — kill Python algo process via process manager
-    log::info!("stop_algo called for algo_id={}", _algo_id);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn get_sessions(state: tauri::State<DbState>) -> Result<Vec<Session>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::get_sessions(&conn).map_err(|e| e.to_string())
@@ -80,4 +59,108 @@ pub fn get_algo_runs(
 ) -> Result<Vec<AlgoRun>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::get_algo_runs(&conn, session_id).map_err(|e| e.to_string())
+}
+
+// --- Data Sources ---
+
+#[tauri::command]
+pub fn get_data_sources(state: tauri::State<DbState>) -> Result<Vec<DataSource>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_data_sources(&conn).map_err(|e| e.to_string())
+}
+
+// --- Algo Instances ---
+
+#[tauri::command]
+pub fn get_algo_instances(
+    state: tauri::State<DbState>,
+    data_source_id: Option<String>,
+) -> Result<Vec<AlgoInstance>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::get_algo_instances(&conn, data_source_id.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_algo_instance(
+    state: tauri::State<DbState>,
+    algo_id: i64,
+    data_source_id: String,
+    account: String,
+    mode: String,
+    risk_config: Option<RiskConfig>,
+) -> Result<AlgoInstance, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let rc = risk_config.unwrap_or(RiskConfig {
+        max_position_size: None,
+        max_daily_loss: None,
+        max_daily_trades: None,
+        stop_loss_ticks: None,
+    });
+    db::create_algo_instance(
+        &conn,
+        &id,
+        algo_id,
+        &data_source_id,
+        &account,
+        &mode,
+        rc.max_position_size.unwrap_or(5),
+        rc.max_daily_loss.unwrap_or(500.0),
+        rc.max_daily_trades.unwrap_or(50),
+        rc.stop_loss_ticks,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn start_algo_instance(
+    state: tauri::State<DbState>,
+    instance_id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    // TODO: Phase 2 — spawn Python algo process via process manager
+    db::update_algo_instance_status(&conn, &instance_id, "running", None)
+        .map_err(|e| e.to_string())?;
+    log::info!("start_algo_instance called for instance_id={}", instance_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_algo_instance(
+    state: tauri::State<DbState>,
+    instance_id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    // TODO: Phase 2 — kill Python algo process via process manager
+    db::update_algo_instance_status(&conn, &instance_id, "stopped", None)
+        .map_err(|e| e.to_string())?;
+    log::info!("stop_algo_instance called for instance_id={}", instance_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_instance_risk(
+    state: tauri::State<DbState>,
+    instance_id: String,
+    risk_config: RiskConfig,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::update_algo_instance_risk(
+        &conn,
+        &instance_id,
+        risk_config.max_position_size.unwrap_or(5),
+        risk_config.max_daily_loss.unwrap_or(500.0),
+        risk_config.max_daily_trades.unwrap_or(50),
+        risk_config.stop_loss_ticks,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_algo_instance(
+    state: tauri::State<DbState>,
+    instance_id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    db::delete_algo_instance(&conn, &instance_id).map_err(|e| e.to_string())
 }

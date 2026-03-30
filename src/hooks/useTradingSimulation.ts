@@ -5,11 +5,33 @@ type Algo = {
   name: string;
 };
 
+export type DataSource = {
+  id: string;           // "ES 09-26:5min"
+  instrument: string;   // "ES 09-26"
+  timeframe: string;    // "5min"
+  account: string;      // "Demo-1"
+};
+
+export type AlgoInstance = {
+  id: string;           // UUID
+  algo_id: number;
+  data_source_id: string;
+  account: string;
+  mode: "live" | "shadow";
+  status: "stopped" | "starting" | "running" | "error";
+  max_position_size: number;
+  max_daily_loss: number;
+  max_daily_trades: number;
+  stop_loss_ticks: number | null;
+};
+
 type AlgoRun = {
   algo_id: number;
   status: string;
   mode: string;
   account: string;
+  data_source_id: string;
+  instance_id: string;
 };
 
 export type Position = {
@@ -22,6 +44,8 @@ export type Position = {
   algo: string;
   algoId: number;
   account: string;
+  dataSourceId: string;
+  instanceId: string;
 };
 
 export type SimOrder = {
@@ -35,6 +59,8 @@ export type SimOrder = {
   algo: string;
   algoId: number;
   account: string;
+  dataSourceId: string;
+  instanceId: string;
 };
 
 export const ACCOUNTS = ["Demo-1", "Demo-2", "Demo-3", "Demo-4", "Demo-5"] as const;
@@ -75,10 +101,14 @@ export type TradingSimulation = {
     consecutiveWins: number;
     consecutiveLosses: number;
   };
-  algoStats: Record<number, AlgoStats>;
+  algoStats: Record<string, AlgoStats>;
 };
 
-const SYMBOLS = ["ES", "NQ", "YM", "RTY", "CL", "GC"];
+export const DUMMY_DATA_SOURCES: DataSource[] = [
+  { id: "ES 09-26:5min", instrument: "ES 09-26", timeframe: "5min", account: "Demo-1" },
+  { id: "NQ 09-26:1min", instrument: "NQ 09-26", timeframe: "1min", account: "Demo-1" },
+  { id: "ES 09-26:1min", instrument: "ES 09-26", timeframe: "1min", account: "Demo-2" },
+];
 
 const randomFrom = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 const randomBetween = (min: number, max: number) => min + Math.random() * (max - min);
@@ -101,26 +131,24 @@ export const formatPrice = (symbol: string, price: number) => {
 const formatTime = (date: Date) =>
   date.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-// Assign each algo a consistent symbol pool based on its id
-const getAlgoSymbols = (algoId: number): string[] => {
-  const shuffled = [...SYMBOLS].sort((a, b) => {
-    const ha = (algoId * 31 + a.charCodeAt(0)) % 100;
-    const hb = (algoId * 31 + b.charCodeAt(0)) % 100;
-    return ha - hb;
-  });
-  return shuffled.slice(0, 2 + (algoId % 3));
+const getSymbolFromDataSource = (dataSourceId: string): string => {
+  // "ES 09-26:5min" -> "ES"
+  const instrument = dataSourceId.split(":")[0]; // "ES 09-26"
+  return instrument.split(" ")[0]; // "ES"
 };
 
-
-// Per-algo stats that stay consistent across views — seeded by algo id but with
-// realistic, correlated numbers
-const computeAlgoStats = (algoId: number, orders: SimOrder[], positions: Position[]): AlgoStats => {
-  const algoOrders = orders.filter((o) => o.algoId === algoId && o.status === "Filled");
-  const algoPositions = positions.filter((p) => p.algoId === algoId);
-  const totalTrades = algoOrders.length;
-  const seed = algoId * 7;
+// Per-instance stats seeded by instance id hash
+const computeInstanceStats = (instanceId: string, orders: SimOrder[], positions: Position[]): AlgoStats => {
+  const instOrders = orders.filter((o) => o.instanceId === instanceId && o.status === "Filled");
+  const instPositions = positions.filter((p) => p.instanceId === instanceId);
+  const totalTrades = instOrders.length;
+  // Simple hash from instanceId string for seeding
+  let seed = 0;
+  for (let i = 0; i < instanceId.length; i++) {
+    seed = (seed * 31 + instanceId.charCodeAt(i)) & 0x7fffffff;
+  }
   const winRate = totalTrades > 0 ? 52 + (seed % 20) : 0;
-  const pnl = algoPositions.reduce((sum, p) => sum + p.targetPnl, 0);
+  const pnl = instPositions.reduce((sum, p) => sum + p.targetPnl, 0);
   const sharpe = totalTrades > 3 ? (1.2 + (seed % 15) / 10).toFixed(2) : "--";
   const maxDrawdown = totalTrades > 0 ? -(200 + (seed % 800)) : 0;
   const avgWin = totalTrades > 0 ? 180 + (seed % 120) : 0;
@@ -130,14 +158,17 @@ const computeAlgoStats = (algoId: number, orders: SimOrder[], positions: Positio
   return { totalTrades, winRate, pnl, sharpe, maxDrawdown, avgWin, avgLoss, profitFactor };
 };
 
-const runKey = (r: AlgoRun) => `${r.algo_id}:${r.account}`;
+const runKey = (r: AlgoRun) => r.instance_id;
 
-export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): TradingSimulation => {
+export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[], dataSources: DataSource[]): TradingSimulation => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<SimOrder[]>([]);
   const [pnlHistory, setPnlHistory] = useState<number[]>([0]);
   const nextOrderId = useRef(1);
   const prevRunKeysRef = useRef<Set<string>>(new Set());
+
+  // dataSources kept for future use; suppress unused lint
+  void dataSources;
 
   const runningAlgos = algos.filter((a) => activeRuns.some((r) => r.algo_id === a.id));
   const getAlgoName = (id: number) => algos.find((a) => a.id === id)?.name ?? "unknown";
@@ -153,12 +184,14 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
     const stoppedKeys = [...prevKeys].filter((k) => !currentKeys.has(k));
 
     const started = startedKeys.map((k) => {
-      const [idStr, account] = k.split(":");
-      return { algoId: parseInt(idStr), account };
-    });
+      const run = activeRuns.find((r) => r.instance_id === k);
+      return run ? { algoId: run.algo_id, account: run.account, dataSourceId: run.data_source_id, instanceId: run.instance_id } : null;
+    }).filter(Boolean) as { algoId: number; account: string; dataSourceId: string; instanceId: string }[];
+
     const stopped = stoppedKeys.map((k) => {
-      const [idStr, account] = k.split(":");
-      return { algoId: parseInt(idStr), account };
+      // The run is no longer in activeRuns, so we look up the instance_id from positions/orders
+      // or reconstruct from the key (which IS the instance_id)
+      return { instanceId: k };
     });
 
     if (started.length > 0) {
@@ -166,28 +199,26 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
       const newOrders: SimOrder[] = [];
       const now = new Date();
 
-      for (const { algoId, account } of started) {
+      for (const { algoId, account, dataSourceId, instanceId } of started) {
         const algoName = getAlgoName(algoId);
-        const symbols = getAlgoSymbols(algoId);
+        const symbol = getSymbolFromDataSource(dataSourceId);
 
-        for (const symbol of symbols) {
-          const base = basePrices[symbol] ?? 100;
-          const side = randomFrom(["Long", "Short"] as const);
-          const price = parseFloat(formatPrice(symbol, base + randomBetween(-3, 3)));
-          const qty = Math.ceil(Math.random() * 4);
-          const pnl = randomBetween(-50, 100);
+        const base = basePrices[symbol] ?? 100;
+        const side = randomFrom(["Long", "Short"] as const);
+        const price = parseFloat(formatPrice(symbol, base + randomBetween(-3, 3)));
+        const qty = Math.ceil(Math.random() * 4);
+        const pnl = randomBetween(-50, 100);
 
-          newPositions.push({
-            symbol, side, qty, avgPrice: price, pnl, targetPnl: pnl,
-            algo: algoName, algoId, account,
-          });
+        newPositions.push({
+          symbol, side, qty, avgPrice: price, pnl, targetPnl: pnl,
+          algo: algoName, algoId, account, dataSourceId, instanceId,
+        });
 
-          newOrders.push({
-            id: nextOrderId.current++, time: formatTime(now),
-            symbol, side: side === "Long" ? "Buy" : "Sell", qty, price,
-            status: "Filled", algo: algoName, algoId, account,
-          });
-        }
+        newOrders.push({
+          id: nextOrderId.current++, time: formatTime(now),
+          symbol, side: side === "Long" ? "Buy" : "Sell", qty, price,
+          status: "Filled", algo: algoName, algoId, account, dataSourceId, instanceId,
+        });
       }
 
       setPositions((prev) => [...prev, ...newPositions]);
@@ -200,7 +231,7 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
 
       setPositions((prev) => {
         const closing = prev.filter((p) =>
-          stopped.some((s) => s.algoId === p.algoId && s.account === p.account)
+          stopped.some((s) => s.instanceId === p.instanceId)
         );
         for (const pos of closing) {
           const base = basePrices[pos.symbol] ?? 100;
@@ -209,10 +240,11 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
             symbol: pos.symbol, side: pos.side === "Long" ? "Sell" : "Buy",
             qty: pos.qty, price: parseFloat(formatPrice(pos.symbol, base + randomBetween(-2, 2))),
             status: "Filled", algo: pos.algo, algoId: pos.algoId, account: pos.account,
+            dataSourceId: pos.dataSourceId, instanceId: pos.instanceId,
           });
         }
         return prev.filter((p) =>
-          !stopped.some((s) => s.algoId === p.algoId && s.account === p.account)
+          !stopped.some((s) => s.instanceId === p.instanceId)
         );
       });
 
@@ -223,8 +255,8 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
       // Clean up per-run P&L histories for stopped runs
       setRunPnlHistories((prev) => {
         const next = { ...prev };
-        for (const { algoId, account } of stopped) {
-          delete next[`${algoId}:${account}`];
+        for (const { instanceId } of stopped) {
+          delete next[instanceId];
         }
         return next;
       });
@@ -291,8 +323,8 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
         if (prev.length <= runningAlgos.length) return prev; // keep at least 1 per algo
         const idx = Math.floor(Math.random() * prev.length);
         const pos = prev[idx];
-        const algoCount = prev.filter((p) => p.algoId === pos.algoId).length;
-        if (algoCount <= 1) return prev; // don't close last position for an algo
+        const instanceCount = prev.filter((p) => p.instanceId === pos.instanceId).length;
+        if (instanceCount <= 1) return prev; // don't close last position for an instance
 
         const base = basePrices[pos.symbol] ?? 100;
         const exitPrice = parseFloat(formatPrice(pos.symbol, base + randomBetween(-3, 3)));
@@ -307,6 +339,8 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
           algo: pos.algo,
           algoId: pos.algoId,
           account: pos.account,
+          dataSourceId: pos.dataSourceId,
+          instanceId: pos.instanceId,
         };
         setOrders((o) => [exitOrder, ...o].slice(0, 100));
         return prev.filter((_, i) => i !== idx);
@@ -319,14 +353,11 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
       const run = randomFrom(activeRuns);
       const algo = algos.find((a) => a.id === run.algo_id);
       if (!algo) return;
+      const symbol = getSymbolFromDataSource(run.data_source_id);
       setPositions((prev) => {
-        const runPositions = prev.filter((p) => p.algoId === algo.id && p.account === run.account);
+        const runPositions = prev.filter((p) => p.instanceId === run.instance_id);
         if (runPositions.length >= 4) return prev;
-        const usedSymbols = runPositions.map((p) => p.symbol);
-        const available = SYMBOLS.filter((s) => !usedSymbols.includes(s));
-        if (available.length === 0) return prev;
 
-        const symbol = randomFrom(available);
         const base = basePrices[symbol] ?? 100;
         const side = randomFrom(["Long", "Short"] as const);
         const price = parseFloat(formatPrice(symbol, base + randomBetween(-3, 3)));
@@ -337,12 +368,14 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
           id: nextOrderId.current++, time: formatTime(new Date()),
           symbol, side: side === "Long" ? "Buy" : "Sell", qty, price,
           status: "Filled", algo: algo.name, algoId: algo.id, account: run.account,
+          dataSourceId: run.data_source_id, instanceId: run.instance_id,
         };
         setOrders((o) => [entryOrder, ...o].slice(0, 100));
 
         return [
           ...prev,
-          { symbol, side, qty, avgPrice: price, pnl, targetPnl: pnl, algo: algo.name, algoId: algo.id, account: run.account },
+          { symbol, side, qty, avgPrice: price, pnl, targetPnl: pnl, algo: algo.name, algoId: algo.id, account: run.account,
+            dataSourceId: run.data_source_id, instanceId: run.instance_id },
         ];
       });
     }, 5000 + Math.random() * 3000);
@@ -353,8 +386,7 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
       const run = randomFrom(activeRuns);
       const algo = algos.find((a) => a.id === run.algo_id);
       if (!algo) return;
-      const symbols = getAlgoSymbols(algo.id);
-      const symbol = randomFrom(symbols);
+      const symbol = getSymbolFromDataSource(run.data_source_id);
       const base = basePrices[symbol] ?? 100;
       const status = randomFrom(["Working", "Working", "Cancelled"] as const);
 
@@ -364,6 +396,7 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
         qty: Math.ceil(Math.random() * 3),
         price: parseFloat(formatPrice(symbol, base + randomBetween(-8, 8))),
         status, algo: algo.name, algoId: algo.id, account: run.account,
+        dataSourceId: run.data_source_id, instanceId: run.instance_id,
       };
       setOrders((o) => [order, ...o].slice(0, 100));
     }, 6000 + Math.random() * 4000);
@@ -410,10 +443,10 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[]): Trad
   const consecutiveWins = totalTrades > 0 ? 2 + (seed % 5) : 0;
   const consecutiveLosses = totalTrades > 0 ? 1 + (seed % 3) : 0;
 
-  // Per-algo stats
-  const algoStats: Record<number, AlgoStats> = {};
+  // Per-instance stats
+  const algoStats: Record<string, AlgoStats> = {};
   for (const run of activeRuns) {
-    algoStats[run.algo_id] = computeAlgoStats(run.algo_id, orders, positions);
+    algoStats[run.instance_id] = computeInstanceStats(run.instance_id, orders, positions);
   }
 
   return {

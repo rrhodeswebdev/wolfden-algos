@@ -3,6 +3,8 @@ type AlgoRun = {
   status: string;
   mode: string;
   account: string;
+  data_source_id: string;
+  instance_id: string;
 };
 
 type Algo = {
@@ -250,7 +252,7 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, stats, positions
                   if (!algo) return null;
                   return (
                     <div
-                      key={`${run.algo_id}:${run.account}`}
+                      key={run.instance_id}
                       className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)]"
                     >
                       <div className="flex items-center gap-3">
@@ -263,7 +265,10 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, stats, positions
                         />
                         <div>
                           <span className="text-sm">{algo.name}</span>
-                          <span className="text-xs text-[var(--text-secondary)] ml-2">{run.account}</span>
+                          <span className="text-xs text-[var(--text-secondary)] ml-2">
+                            {run.data_source_id.split(":")[0].split(" ")[0]} {run.data_source_id.split(":")[1]}
+                          </span>
+                          <span className="text-xs text-[var(--text-secondary)] ml-1">{run.account}</span>
                         </div>
                       </div>
                       <span

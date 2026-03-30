@@ -2,19 +2,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Child;
 
-/// Manages Python algo processes — spawn, monitor, kill.
+/// Manages Python algo processes -- spawn, monitor, kill.
 ///
-/// Each algo runs in its own process with its own venv.
+/// Each algo instance runs in its own process with its own venv.
 /// Communication via ZeroMQ (SUB for market data, PUSH for orders).
 ///
-/// TODO: Phase 2 implementation
-/// - Spawn Python processes using venv interpreter
-/// - Pass ZMQ addresses and algo config via command-line args or env vars
-/// - Monitor heartbeats, restart on crash
-/// - Enforce resource limits
+/// Keyed by instance_id (UUID) so the same algo can run on multiple
+/// data sources / accounts simultaneously with isolated state.
 
 pub struct ProcessManager {
-    processes: HashMap<i64, AlgoProcess>,
+    processes: HashMap<String, AlgoProcess>,
     python_path: PathBuf,
     algo_envs_dir: PathBuf,
     market_data_addr: String,
@@ -22,7 +19,10 @@ pub struct ProcessManager {
 }
 
 struct AlgoProcess {
+    instance_id: String,
     algo_id: i64,
+    data_source_id: String,
+    account: String,
     child: Child,
     mode: String,
 }

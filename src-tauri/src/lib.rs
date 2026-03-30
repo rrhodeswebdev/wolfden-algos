@@ -39,11 +39,16 @@ pub fn run() {
             commands::create_algo,
             commands::update_algo,
             commands::delete_algo,
-            commands::start_algo,
-            commands::stop_algo,
             commands::get_sessions,
             commands::get_trades,
             commands::get_algo_runs,
+            commands::get_data_sources,
+            commands::get_algo_instances,
+            commands::create_algo_instance,
+            commands::start_algo_instance,
+            commands::stop_algo_instance,
+            commands::update_instance_risk,
+            commands::delete_algo_instance,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

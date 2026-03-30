@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AlgoStats, ACCOUNTS } from "../hooks/useTradingSimulation";
+import { type AlgoStats, type DataSource, DUMMY_DATA_SOURCES } from "../hooks/useTradingSimulation";
 
 type Algo = {
   id: number;
@@ -17,14 +17,21 @@ type AlgoRun = {
   status: string;
   mode: string;
   account: string;
+  data_source_id: string;
+  instance_id: string;
 };
 
 type AlgosViewProps = {
   algos: Algo[];
   activeRuns: AlgoRun[];
-  algoStats: Record<number, AlgoStats>;
-  onStartAlgo: (id: number, mode: "live" | "shadow", account: string) => void;
-  onStopAlgo: (id: number, account: string) => void;
+  algoStats: Record<string, AlgoStats>;
+  onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
+  onStopAlgo: (instanceId: string) => void;
+};
+
+const formatDataSource = (ds: DataSource) => {
+  const symbol = ds.instrument.split(" ")[0];
+  return `${symbol} ${ds.timeframe}`;
 };
 
 const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
@@ -51,79 +58,103 @@ const PerformanceStats = ({ stats }: { stats: AlgoStats }) => {
   );
 };
 
-const AvailableAlgoRow = ({
-  algo,
-  availableAccounts,
+const ChartCard = ({
+  ds,
+  isSelected,
+  runCount,
+  onClick,
+}: {
+  ds: DataSource;
+  isSelected: boolean;
+  runCount: number;
+  onClick: () => void;
+}) => {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left p-4 rounded-lg border transition-colors ${
+        isSelected
+          ? "bg-[var(--accent-blue)]/10 border-[var(--accent-blue)]/30"
+          : "bg-[var(--bg-panel)] border-[var(--border)] hover:border-[var(--text-secondary)]/30"
+      }`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-[var(--accent-green)]" />
+          <span className="text-sm font-medium">{formatDataSource(ds)}</span>
+        </div>
+        {runCount > 0 && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]">
+            {runCount} algo{runCount > 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-[var(--text-secondary)]">
+        <span>{ds.instrument}</span>
+        <span>{ds.timeframe}</span>
+        <span>{ds.account}</span>
+      </div>
+    </button>
+  );
+};
+
+const AddAlgoPanel = ({
+  algos,
+  chartRuns,
+  ds,
   onStartAlgo,
 }: {
-  algo: Algo;
-  availableAccounts: string[];
-  onStartAlgo: (id: number, mode: "live" | "shadow", account: string) => void;
+  algos: Algo[];
+  chartRuns: AlgoRun[];
+  ds: DataSource;
+  onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
 }) => {
-  const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set([availableAccounts[0]]));
+  const availableAlgos = algos.filter(
+    (a) => !chartRuns.some((r) => r.algo_id === a.id)
+  );
 
-  // Keep selection in sync — remove accounts that are no longer available
-  const validSelected = new Set([...selectedAccounts].filter((a) => availableAccounts.includes(a)));
-  if (validSelected.size === 0 && availableAccounts.length > 0) {
-    validSelected.add(availableAccounts[0]);
+  if (availableAlgos.length === 0) {
+    return (
+      <div className="px-6 py-4 text-xs text-[var(--text-secondary)]">
+        All algos are already running on this chart
+      </div>
+    );
   }
 
-  const toggleAccount = (account: string) => {
-    const next = new Set(validSelected);
-    if (next.has(account)) {
-      if (next.size > 1) next.delete(account);
-    } else {
-      next.add(account);
-    }
-    setSelectedAccounts(next);
-  };
-
-  const startOnSelected = (mode: "live" | "shadow") => {
-    for (const account of validSelected) {
-      onStartAlgo(algo.id, mode, account);
-    }
-  };
-
   return (
-    <div className="px-6 py-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">{algo.name}</div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => startOnSelected("shadow")}
-            className="px-4 py-2 text-xs bg-[var(--accent-yellow)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
-          >
-            Shadow
-          </button>
-          <button
-            onClick={() => startOnSelected("live")}
-            className="px-4 py-2 text-xs bg-[var(--accent-green)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
-          >
-            Live
-          </button>
-        </div>
+    <div className="px-6 py-4 border-t border-[var(--border)]">
+      <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-3 font-semibold">
+        Add Algo
       </div>
-      <div className="flex items-center gap-1.5 mt-3">
-        <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mr-1">Accounts</span>
-        {availableAccounts.map((account) => (
-          <button
-            key={account}
-            onClick={() => toggleAccount(account)}
-            className={`px-3 py-1 text-[11px] rounded-md transition-colors ${
-              validSelected.has(account)
-                ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] border border-[var(--border)]"
-            }`}
+      <div className="space-y-2">
+        {availableAlgos.map((algo) => (
+          <div
+            key={algo.id}
+            className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)]"
           >
-            {account}
-          </button>
+            <span className="text-sm font-medium">{algo.name}</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onStartAlgo(algo.id, "shadow", ds.account, ds.id)}
+                className="px-3 py-1.5 text-[11px] bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)] rounded-md hover:bg-[var(--accent-yellow)]/25 transition-colors font-medium"
+              >
+                Shadow
+              </button>
+              <button
+                onClick={() => onStartAlgo(algo.id, "live", ds.account, ds.id)}
+                className="px-3 py-1.5 text-[11px] bg-[var(--accent-green)]/15 text-[var(--accent-green)] rounded-md hover:bg-[var(--accent-green)]/25 transition-colors font-medium"
+              >
+                Live
+              </button>
+            </div>
+          </div>
         ))}
       </div>
     </div>
   );
 };
 
-const RunningAlgoRow = ({
+const RunningInstanceRow = ({
   algo,
   run,
   stats,
@@ -132,65 +163,33 @@ const RunningAlgoRow = ({
   algo: Algo;
   run: AlgoRun;
   stats: AlgoStats | undefined;
-  onStopAlgo: (id: number, account: string) => void;
+  onStopAlgo: (instanceId: string) => void;
 }) => (
   <div>
     <div className="flex items-center justify-between px-6 py-4">
       <div className="flex items-center gap-4">
         <div>
-          <div className="text-sm font-medium">{algo.name}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium">{algo.name}</div>
+            <span className={`text-[10px] uppercase px-2 py-0.5 rounded-md font-medium ${
+              run.mode === "live"
+                ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+                : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
+            }`}>
+              {run.mode}
+            </span>
+          </div>
           <div className="text-xs text-[var(--text-secondary)] mt-0.5">{run.account}</div>
         </div>
       </div>
       <button
-        onClick={() => onStopAlgo(algo.id, run.account)}
+        onClick={() => onStopAlgo(run.instance_id)}
         className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
       >
         Stop
       </button>
     </div>
     {stats && <PerformanceStats stats={stats} />}
-  </div>
-);
-
-const Section = ({
-  title,
-  count,
-  color,
-  children,
-  onStopAll,
-}: {
-  title: string;
-  count: number;
-  color: string;
-  children: React.ReactNode;
-  onStopAll?: () => void;
-}) => (
-  <div className="bg-[var(--bg-panel)] rounded-lg overflow-hidden flex flex-col min-h-0">
-    <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] flex-shrink-0">
-      <div className="flex items-center gap-3">
-        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${color}`} />
-        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-          {title}
-        </span>
-        <span className="text-xs text-[var(--text-secondary)]">{count}</span>
-      </div>
-      {onStopAll && count > 0 && (
-        <button
-          onClick={onStopAll}
-          className="px-3 py-1.5 text-[11px] bg-[var(--accent-red)]/15 text-[var(--accent-red)] rounded-md hover:bg-[var(--accent-red)]/25 transition-colors font-medium"
-        >
-          Stop All
-        </button>
-      )}
-    </div>
-    {count > 0 ? (
-      <div className="divide-y divide-[var(--border)] overflow-auto flex-1 min-h-0">{children}</div>
-    ) : (
-      <div className="px-6 py-4 text-xs text-[var(--text-secondary)]">
-        No algos
-      </div>
-    )}
   </div>
 );
 
@@ -201,70 +200,120 @@ export const AlgosView = ({
   onStartAlgo,
   onStopAlgo,
 }: AlgosViewProps) => {
-  const liveRuns = activeRuns.filter((r) => r.mode === "live");
-  const shadowRuns = activeRuns.filter((r) => r.mode === "shadow");
+  const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
+  const dataSources = DUMMY_DATA_SOURCES;
 
-  // An algo is "available" if it has at least one account without a run
-  const getAvailableAccounts = (algoId: number) =>
-    ACCOUNTS.filter((account) => !activeRuns.some((r) => r.algo_id === algoId && r.account === account));
+  const selectedDs = dataSources.find((ds) => ds.id === selectedChartId) ?? null;
+  const chartRuns = selectedChartId
+    ? activeRuns.filter((r) => r.data_source_id === selectedChartId)
+    : [];
 
-  const availableAlgos = algos.filter((a) => getAvailableAccounts(a.id).length > 0);
+  const getRunCount = (dsId: string) => activeRuns.filter((r) => r.data_source_id === dsId).length;
 
   return (
-    <div className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
-      <Section title="Available" count={availableAlgos.length} color="bg-[var(--accent-blue)]">
-        {availableAlgos.map((algo) => (
-          <AvailableAlgoRow
-            key={algo.id}
-            algo={algo}
-            availableAccounts={getAvailableAccounts(algo.id)}
-            onStartAlgo={onStartAlgo}
-          />
-        ))}
-      </Section>
+    <div className="flex-1 flex gap-4 p-4 overflow-hidden">
+      {/* Left: Charts Panel */}
+      <div className="w-72 flex flex-col gap-3 overflow-auto flex-shrink-0">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            Charts
+          </h2>
+          <span className="text-xs text-[var(--text-secondary)]">
+            {dataSources.length} connected
+          </span>
+        </div>
 
-      <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
-        <Section
-          title="Shadow"
-          count={shadowRuns.length}
-          color="bg-[var(--accent-yellow)]"
-          onStopAll={() => shadowRuns.forEach((r) => onStopAlgo(r.algo_id, r.account))}
-        >
-          {shadowRuns.map((run) => {
-            const algo = algos.find((a) => a.id === run.algo_id);
-            if (!algo) return null;
-            return (
-              <RunningAlgoRow
-                key={`${run.algo_id}:${run.account}`}
-                algo={algo}
-                run={run}
-                stats={algoStats[run.algo_id]}
-                onStopAlgo={onStopAlgo}
+        {dataSources.length === 0 ? (
+          <div className="p-4 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)] text-xs text-[var(--text-secondary)]">
+            No charts connected. Add the WolfDenBridge indicator to a NinjaTrader chart to get started.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {dataSources.map((ds) => (
+              <ChartCard
+                key={ds.id}
+                ds={ds}
+                isSelected={selectedChartId === ds.id}
+                runCount={getRunCount(ds.id)}
+                onClick={() => setSelectedChartId(ds.id === selectedChartId ? null : ds.id)}
               />
-            );
-          })}
-        </Section>
+            ))}
+          </div>
+        )}
+      </div>
 
-        <Section
-          title="Live"
-          count={liveRuns.length}
-          color="bg-[var(--accent-green)]"
-          onStopAll={() => liveRuns.forEach((r) => onStopAlgo(r.algo_id, r.account))}
-        >
-          {liveRuns.map((run) => {
-            const algo = algos.find((a) => a.id === run.algo_id);
-            if (!algo) return null;
-            return (
-              <RunningAlgoRow
-                key={`${run.algo_id}:${run.account}`}
-                algo={algo}
-                run={run}
-                stats={algoStats[run.algo_id]}
-                onStopAlgo={onStopAlgo}
-              />
-            );
-          })}
-        </Section>
+      {/* Right: Chart Detail / Instance Management */}
+      <div className="flex-1 flex flex-col gap-4 min-h-0">
+        {selectedDs ? (
+          <>
+            {/* Chart header */}
+            <div className="bg-[var(--bg-panel)] rounded-lg p-4 border border-[var(--border)]">
+              <div className="flex items-center gap-3 mb-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent-green)]" />
+                <h2 className="text-base font-semibold">{formatDataSource(selectedDs)}</h2>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)] ml-5">
+                <span>{selectedDs.instrument}</span>
+                <span>{selectedDs.timeframe}</span>
+                <span>{selectedDs.account}</span>
+              </div>
+            </div>
+
+            {/* Running instances on this chart */}
+            <div className="flex-1 bg-[var(--bg-panel)] rounded-lg flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                    Running Algos
+                  </span>
+                  <span className="text-xs text-[var(--text-secondary)]">{chartRuns.length}</span>
+                </div>
+                {chartRuns.length > 0 && (
+                  <button
+                    onClick={() => chartRuns.forEach((r) => onStopAlgo(r.instance_id))}
+                    className="px-3 py-1.5 text-[11px] bg-[var(--accent-red)]/15 text-[var(--accent-red)] rounded-md hover:bg-[var(--accent-red)]/25 transition-colors font-medium"
+                  >
+                    Stop All
+                  </button>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-auto divide-y divide-[var(--border)]">
+                {chartRuns.length === 0 ? (
+                  <div className="px-6 py-6 text-xs text-[var(--text-secondary)] text-center">
+                    No algos running on this chart. Add one below.
+                  </div>
+                ) : (
+                  chartRuns.map((run) => {
+                    const algo = algos.find((a) => a.id === run.algo_id);
+                    if (!algo) return null;
+                    return (
+                      <RunningInstanceRow
+                        key={run.instance_id}
+                        algo={algo}
+                        run={run}
+                        stats={algoStats[run.instance_id]}
+                        onStopAlgo={onStopAlgo}
+                      />
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Add algo to this chart */}
+              <AddAlgoPanel
+                  algos={algos}
+                  chartRuns={chartRuns}
+                  ds={selectedDs}
+                  onStartAlgo={onStartAlgo}
+                />
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm text-[var(--text-secondary)]">
+            Select a chart to manage algos
+          </div>
+        )}
       </div>
     </div>
   );

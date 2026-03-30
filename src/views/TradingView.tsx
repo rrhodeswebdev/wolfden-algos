@@ -11,6 +11,8 @@ type AlgoRun = {
   status: string;
   mode: string;
   account: string;
+  data_source_id: string;
+  instance_id: string;
 };
 
 type TradingViewProps = {
@@ -94,6 +96,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
   const { positions, orders, pnlHistory, runPnlHistories, stats } = simulation;
   const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [selectedChart, setSelectedChart] = useState<string | null>(null);
 
   // Clear algo selection if the selected algo stops running
   useEffect(() => {
@@ -104,17 +107,25 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
 
   const runningAlgos = algos.filter((a) => activeRuns.some((r) => r.algo_id === a.id));
 
-  // Derive active accounts from positions/orders
+  // Derive active accounts and charts from active runs
   const activeAccounts = [...new Set([
     ...positions.map((p) => p.account),
     ...orders.map((o) => o.account),
   ])].sort();
 
-  // Filter data based on both selections
-  const applyFilters = <T extends { algoId: number; account: string }>(items: T[]): T[] => {
+  const activeCharts = [...new Set(activeRuns.map((r) => r.data_source_id))].sort();
+
+  const formatChartLabel = (dsId: string) => {
+    const [instrument, tf] = dsId.split(":");
+    return `${instrument.split(" ")[0]} ${tf}`;
+  };
+
+  // Filter data based on all selections
+  const applyFilters = <T extends { algoId: number; account: string; dataSourceId: string }>(items: T[]): T[] => {
     let result = items;
     if (selectedAlgoId !== null) result = result.filter((i) => i.algoId === selectedAlgoId);
     if (selectedAccount !== null) result = result.filter((i) => i.account === selectedAccount);
+    if (selectedChart !== null) result = result.filter((i) => i.dataSourceId === selectedChart);
     return result;
   };
 
@@ -123,14 +134,15 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
 
   // P&L history: sum relevant run histories based on filters
   const filteredPnlHistory = (() => {
-    if (selectedAlgoId === null && selectedAccount === null) return pnlHistory;
+    if (selectedAlgoId === null && selectedAccount === null && selectedChart === null) return pnlHistory;
 
-    // Find matching run keys
-    const matchingKeys = Object.keys(runPnlHistories).filter((key) => {
-      const [idStr, account] = key.split(":");
-      const algoId = parseInt(idStr);
-      if (selectedAlgoId !== null && algoId !== selectedAlgoId) return false;
-      if (selectedAccount !== null && account !== selectedAccount) return false;
+    // Find matching run keys (instance_ids)
+    const matchingKeys = Object.keys(runPnlHistories).filter((instanceId) => {
+      const run = activeRuns.find((r) => r.instance_id === instanceId);
+      if (!run) return false;
+      if (selectedAlgoId !== null && run.algo_id !== selectedAlgoId) return false;
+      if (selectedAccount !== null && run.account !== selectedAccount) return false;
+      if (selectedChart !== null && run.data_source_id !== selectedChart) return false;
       return true;
     });
 
@@ -151,7 +163,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
   })();
 
   // Compute filtered stats
-  const hasFilters = selectedAlgoId !== null || selectedAccount !== null;
+  const hasFilters = selectedAlgoId !== null || selectedAccount !== null || selectedChart !== null;
   const filteredStats = hasFilters
     ? (() => {
         const fp = filteredPositions;
@@ -187,7 +199,42 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
     <div className="flex-1 flex flex-col gap-3 p-4 overflow-hidden">
       {/* View-Level Filters */}
       {(runningAlgos.length > 0 || activeAccounts.length > 0) && (
-        <div className="flex items-center gap-4 px-2">
+        <div className="flex items-center gap-4 px-2 flex-wrap">
+          {/* Chart Filters */}
+          {activeCharts.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mr-1">Chart</span>
+              <button
+                onClick={() => setSelectedChart(null)}
+                className={`px-3 py-1.5 text-[11px] rounded-md transition-colors ${
+                  selectedChart === null
+                    ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                }`}
+              >
+                All
+              </button>
+              {activeCharts.map((dsId) => (
+                <button
+                  key={dsId}
+                  onClick={() => setSelectedChart(dsId === selectedChart ? null : dsId)}
+                  className={`px-3 py-1.5 text-[11px] rounded-md transition-colors ${
+                    selectedChart === dsId
+                      ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                  }`}
+                >
+                  {formatChartLabel(dsId)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Divider */}
+          {activeCharts.length > 0 && activeAccounts.length > 0 && (
+            <div className="w-px h-5 bg-[var(--border)]" />
+          )}
+
           {/* Account Filters */}
           {activeAccounts.length > 0 && (
             <div className="flex items-center gap-1.5">
