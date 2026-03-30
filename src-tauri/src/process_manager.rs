@@ -1,45 +1,160 @@
 use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Child;
+use std::process::{Child, Command};
+use std::sync::Mutex;
 
-/// Manages Python algo processes -- spawn, monitor, kill.
-///
-/// Each algo instance runs in its own process with its own venv.
-/// Communication via ZeroMQ (SUB for market data, PUSH for orders).
-///
-/// Keyed by instance_id (UUID) so the same algo can run on multiple
-/// data sources / accounts simultaneously with isolated state.
+use crate::db::{self, DbState};
+use crate::zmq_hub;
 
+/// Manages Python algo processes — spawn, track, kill.
+///
+/// Each algo instance runs in its own process with ZMQ connections
+/// to the Rust backend. Keyed by instance_id (UUID).
 pub struct ProcessManager {
-    processes: HashMap<String, AlgoProcess>,
-    python_path: PathBuf,
-    algo_envs_dir: PathBuf,
-    market_data_addr: String,
-    trade_signal_addr: String,
-}
-
-struct AlgoProcess {
-    instance_id: String,
-    algo_id: i64,
-    data_source_id: String,
-    account: String,
-    child: Child,
-    mode: String,
+    processes: Mutex<HashMap<String, Child>>,
+    algo_dir: PathBuf,
+    runner_path: PathBuf,
 }
 
 impl ProcessManager {
-    pub fn new(
-        python_path: PathBuf,
-        algo_envs_dir: PathBuf,
-        market_data_addr: String,
-        trade_signal_addr: String,
-    ) -> Self {
+    pub fn new(app_data_dir: PathBuf) -> Self {
+        let algo_dir = app_data_dir.join("algos");
+        fs::create_dir_all(&algo_dir).ok();
+
+        // runner.py lives in algo_runtime/ relative to the binary or the project root
+        let runner_path = Self::find_runner();
+
         ProcessManager {
-            processes: HashMap::new(),
-            python_path,
-            algo_envs_dir,
-            market_data_addr,
-            trade_signal_addr,
+            processes: Mutex::new(HashMap::new()),
+            algo_dir,
+            runner_path,
         }
+    }
+
+    fn find_runner() -> PathBuf {
+        // In dev: relative to the project root
+        let candidates = [
+            PathBuf::from("algo_runtime/runner.py"),
+            PathBuf::from("../algo_runtime/runner.py"),
+            // Relative to executable for release builds
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("algo_runtime/runner.py")))
+                .unwrap_or_default(),
+        ];
+        for c in &candidates {
+            if c.exists() {
+                return c.clone();
+            }
+        }
+        // Default fallback
+        PathBuf::from("algo_runtime/runner.py")
+    }
+
+    /// Spawns a Python algo process for the given instance.
+    /// Writes the algo code to a temp file, then runs runner.py with the correct args.
+    pub fn start_instance(
+        &self,
+        db_state: &DbState,
+        instance_id: &str,
+    ) -> Result<u32, String> {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+
+        // Fetch instance and algo details from DB
+        let instance = db::get_algo_instance_by_id(&conn, instance_id)
+            .map_err(|e| format!("Instance not found: {}", e))?;
+        let algo = db::get_algo_by_id(&conn, instance.algo_id)
+            .map_err(|e| format!("Algo not found: {}", e))?;
+
+        // Write algo code to a file
+        let algo_file = self.algo_dir.join(format!("{}_{}.py", algo.id, instance_id));
+        {
+            let mut f = fs::File::create(&algo_file)
+                .map_err(|e| format!("Failed to write algo file: {}", e))?;
+            f.write_all(algo.code.as_bytes())
+                .map_err(|e| format!("Failed to write algo code: {}", e))?;
+        }
+
+        // Spawn runner.py
+        let child = Command::new("python3")
+            .arg(self.runner_path.to_str().unwrap_or("algo_runtime/runner.py"))
+            .arg("--algo-path")
+            .arg(algo_file.to_str().unwrap_or(""))
+            .arg("--market-data-addr")
+            .arg(zmq_hub::market_data_addr())
+            .arg("--trade-signal-addr")
+            .arg(zmq_hub::trade_signal_addr())
+            .arg("--instance-id")
+            .arg(instance_id)
+            .arg("--algo-id")
+            .arg(instance.algo_id.to_string())
+            .arg("--source-id")
+            .arg(&instance.data_source_id)
+            .arg("--account")
+            .arg(&instance.account)
+            .arg("--mode")
+            .arg(&instance.mode)
+            .arg("--max-position-size")
+            .arg(instance.max_position_size.to_string())
+            .arg("--max-daily-loss")
+            .arg(instance.max_daily_loss.to_string())
+            .arg("--max-daily-trades")
+            .arg(instance.max_daily_trades.to_string())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn runner.py: {}", e))?;
+
+        let pid = child.id();
+        log::info!(
+            "Spawned algo process: instance={} algo={} pid={} source={}",
+            instance_id, algo.name, pid, instance.data_source_id
+        );
+
+        // Update DB with PID
+        db::update_algo_instance_status(&conn, instance_id, "running", Some(pid as i64))
+            .map_err(|e| format!("Failed to update instance status: {}", e))?;
+
+        drop(conn);
+
+        self.processes
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(instance_id.to_string(), child);
+
+        Ok(pid)
+    }
+
+    /// Stops a running algo process by instance_id.
+    pub fn stop_instance(
+        &self,
+        db_state: &DbState,
+        instance_id: &str,
+    ) -> Result<(), String> {
+        let mut procs = self.processes.lock().map_err(|e| e.to_string())?;
+
+        if let Some(mut child) = procs.remove(instance_id) {
+            log::info!("Killing algo process: instance={} pid={}", instance_id, child.id());
+            child.kill().ok();
+            child.wait().ok();
+        } else {
+            log::warn!("No running process found for instance {}", instance_id);
+        }
+
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        db::update_algo_instance_status(&conn, instance_id, "stopped", None)
+            .map_err(|e| format!("Failed to update instance status: {}", e))?;
+
+        // Clean up the algo file
+        let pattern = format!("_{}.py", instance_id);
+        if let Ok(entries) = fs::read_dir(&self.algo_dir) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().ends_with(&pattern) {
+                    fs::remove_file(entry.path()).ok();
+                }
+            }
+        }
+
+        Ok(())
     }
 }

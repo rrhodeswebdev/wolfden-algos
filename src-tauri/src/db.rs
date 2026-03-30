@@ -168,6 +168,50 @@ pub fn get_algos(conn: &Connection) -> Result<Vec<Algo>> {
     rows.collect()
 }
 
+pub fn get_algo_by_id(conn: &Connection, id: i64) -> Result<Algo> {
+    conn.query_row(
+        "SELECT id, name, code, config, dependencies, deps_hash, created_at, updated_at FROM algos WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(Algo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                code: row.get(2)?,
+                config: row.get(3)?,
+                dependencies: row.get(4)?,
+                deps_hash: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        },
+    )
+}
+
+pub fn get_algo_instance_by_id(conn: &Connection, id: &str) -> Result<AlgoInstance> {
+    conn.query_row(
+        "SELECT id, algo_id, data_source_id, account, mode, status, pid, max_position_size, max_daily_loss, max_daily_trades, stop_loss_ticks, started_at, stopped_at, created_at FROM algo_instances WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(AlgoInstance {
+                id: row.get(0)?,
+                algo_id: row.get(1)?,
+                data_source_id: row.get(2)?,
+                account: row.get(3)?,
+                mode: row.get(4)?,
+                status: row.get(5)?,
+                pid: row.get(6)?,
+                max_position_size: row.get(7)?,
+                max_daily_loss: row.get(8)?,
+                max_daily_trades: row.get(9)?,
+                stop_loss_ticks: row.get(10)?,
+                started_at: row.get(11)?,
+                stopped_at: row.get(12)?,
+                created_at: row.get(13)?,
+            })
+        },
+    )
+}
+
 pub fn create_algo(conn: &Connection, name: &str, code: &str, dependencies: &str) -> Result<Algo> {
     conn.execute(
         "INSERT INTO algos (name, code, dependencies) VALUES (?1, ?2, ?3)",
