@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AlgoStats, type DataSource, DUMMY_DATA_SOURCES } from "../hooks/useTradingSimulation";
+import { type AlgoStats, type DataSource } from "../hooks/useTradingSimulation";
 
 type Algo = {
   id: number;
@@ -23,6 +23,7 @@ type AlgoRun = {
 
 type AlgosViewProps = {
   algos: Algo[];
+  dataSources: DataSource[];
   activeRuns: AlgoRun[];
   algoStats: Record<string, AlgoStats>;
   onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
@@ -195,13 +196,13 @@ const RunningInstanceRow = ({
 
 export const AlgosView = ({
   algos,
+  dataSources,
   activeRuns,
   algoStats,
   onStartAlgo,
   onStopAlgo,
 }: AlgosViewProps) => {
   const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
-  const dataSources = DUMMY_DATA_SOURCES;
 
   const selectedDs = dataSources.find((ds) => ds.id === selectedChartId) ?? null;
   const chartRuns = selectedChartId

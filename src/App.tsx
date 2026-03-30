@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { DEFAULT_ALGO } from "./components/AlgoEditor";
 import { Sidebar } from "./components/Sidebar";
 import { HomeView } from "./views/HomeView";
@@ -8,7 +9,8 @@ import { AlgosView } from "./views/AlgosView";
 import { TradingView } from "./views/TradingView";
 import { TitleBar } from "./components/TitleBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { useTradingSimulation, DUMMY_DATA_SOURCES } from "./hooks/useTradingSimulation";
+import { useTradingSimulation } from "./hooks/useTradingSimulation";
+import type { DataSource } from "./hooks/useTradingSimulation";
 
 type Algo = {
   id: number;
@@ -34,14 +36,15 @@ type View = "home" | "editor" | "algos" | "trading";
 
 export const App = () => {
   const [activeView, setActiveView] = useState<View>("home");
-  // TODO: update via WebSocket events from Rust backend
-  const [connectionStatus, _setConnectionStatus] = useState<"waiting" | "connected" | "error">("waiting");
+  const [connectionStatus, setConnectionStatus] = useState<"waiting" | "connected" | "error">("waiting");
+  const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number }>>({});
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [algos, setAlgos] = useState<Algo[]>([]);
   const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
   const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
-  const simulation = useTradingSimulation(algos, activeRuns, DUMMY_DATA_SOURCES);
+  const simulation = useTradingSimulation(algos, activeRuns, dataSources);
   const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
 
   const loadAlgos = useCallback(async () => {
@@ -56,6 +59,40 @@ export const App = () => {
   useEffect(() => {
     loadAlgos();
   }, [loadAlgos]);
+
+  useEffect(() => {
+    const u1 = listen<number>("nt-connection-count", (event) => {
+      setConnectionStatus(event.payload > 0 ? "connected" : "waiting");
+    });
+    const u2 = listen<{ name: string; buying_power: number; cash: number; realized_pnl: number }>("nt-account", (event) => {
+      const { name, ...data } = event.payload;
+      setAccounts((prev) => ({ ...prev, [name]: data }));
+    });
+    const u3 = listen<string>("nt-account-removed", (event) => {
+      setAccounts((prev) => {
+        const next = { ...prev };
+        delete next[event.payload];
+        return next;
+      });
+    });
+    const u4 = listen<DataSource>("nt-chart", (event) => {
+      setDataSources((prev) => {
+        const exists = prev.some((ds) => ds.id === event.payload.id);
+        if (exists) return prev.map((ds) => ds.id === event.payload.id ? event.payload : ds);
+        return [...prev, event.payload];
+      });
+    });
+    const u5 = listen<string>("nt-chart-removed", (event) => {
+      setDataSources((prev) => prev.filter((ds) => ds.id !== event.payload));
+    });
+    return () => {
+      u1.then((f) => f());
+      u2.then((f) => f());
+      u3.then((f) => f());
+      u4.then((f) => f());
+      u5.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedAlgo) {
@@ -203,6 +240,7 @@ export const App = () => {
       {activeView === "home" && (
         <HomeView
           connectionStatus={connectionStatus}
+          accounts={accounts}
           algos={algos}
           activeRuns={activeRuns}
           stats={simulation.stats}
@@ -227,6 +265,7 @@ export const App = () => {
       {activeView === "algos" && (
         <AlgosView
           algos={algos}
+          dataSources={dataSources}
           activeRuns={activeRuns}
           algoStats={simulation.algoStats}
           onStartAlgo={handleStartAlgo}

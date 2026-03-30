@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 
 type Algo = {
   id: number;
@@ -9,11 +10,11 @@ export type DataSource = {
   id: string;           // "ES 09-26:5min"
   instrument: string;   // "ES 09-26"
   timeframe: string;    // "5min"
-  account: string;      // "Demo-1"
+  account: string;      // "Sim101"
 };
 
 export type AlgoInstance = {
-  id: string;           // UUID
+  id: string;
   algo_id: number;
   data_source_id: string;
   account: string;
@@ -63,8 +64,6 @@ export type SimOrder = {
   instanceId: string;
 };
 
-export const ACCOUNTS = ["Demo-1", "Demo-2", "Demo-3", "Demo-4", "Demo-5"] as const;
-
 export type AlgoStats = {
   totalTrades: number;
   winRate: number;
@@ -104,320 +103,175 @@ export type TradingSimulation = {
   algoStats: Record<string, AlgoStats>;
 };
 
-export const DUMMY_DATA_SOURCES: DataSource[] = [
-  { id: "ES 09-26:5min", instrument: "ES 09-26", timeframe: "5min", account: "Demo-1" },
-  { id: "NQ 09-26:1min", instrument: "NQ 09-26", timeframe: "1min", account: "Demo-1" },
-  { id: "ES 09-26:1min", instrument: "ES 09-26", timeframe: "1min", account: "Demo-2" },
-];
-
-const randomFrom = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-const randomBetween = (min: number, max: number) => min + Math.random() * (max - min);
-
-export const basePrices: Record<string, number> = {
-  ES: 5425.50, NQ: 19850.25, YM: 40125.00, RTY: 2085.50, CL: 78.45, GC: 2345.80,
+export const formatPrice = (_symbol: string, price: number) => {
+  return price.toFixed(2);
 };
 
-export const tickSizes: Record<string, number> = {
-  ES: 0.25, NQ: 0.25, YM: 1.0, RTY: 0.10, CL: 0.01, GC: 0.10,
+// --- Event payload types from Rust ---
+
+type PositionEvent = {
+  source_id: string;
+  account: string;
+  symbol: string;
+  direction: string;
+  qty: number;
+  avg_price: number;
+  unrealized_pnl: number;
 };
 
-export const formatPrice = (symbol: string, price: number) => {
-  const tick = tickSizes[symbol] ?? 0.01;
-  const rounded = Math.round(price / tick) * tick;
-  const decimals = tick < 0.1 ? 2 : tick < 1 ? 1 : 0;
-  return rounded.toFixed(decimals);
+type OrderEvent = {
+  source_id: string;
+  account: string;
+  instance_id: string;
+  order_id: string;
+  state: string;
+  symbol: string;
+  filled_qty: number | null;
+  avg_fill_price: number | null;
+  fill_price: number | null;
+  remaining: number | null;
+  error: string | null;
+  timestamp: number | null;
 };
 
-const formatTime = (date: Date) =>
-  date.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
-const getSymbolFromDataSource = (dataSourceId: string): string => {
-  // "ES 09-26:5min" -> "ES"
-  const instrument = dataSourceId.split(":")[0]; // "ES 09-26"
-  return instrument.split(" ")[0]; // "ES"
+const formatTime = (ts: number | null) => {
+  const date = ts ? new Date(ts) : new Date();
+  return date.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 };
 
-// Per-instance stats seeded by instance id hash
-const computeInstanceStats = (instanceId: string, orders: SimOrder[], positions: Position[]): AlgoStats => {
-  const instOrders = orders.filter((o) => o.instanceId === instanceId && o.status === "Filled");
-  const instPositions = positions.filter((p) => p.instanceId === instanceId);
-  const totalTrades = instOrders.length;
-  // Simple hash from instanceId string for seeding
-  let seed = 0;
-  for (let i = 0; i < instanceId.length; i++) {
-    seed = (seed * 31 + instanceId.charCodeAt(i)) & 0x7fffffff;
+const mapOrderStatus = (state: string): "Filled" | "Working" | "Cancelled" => {
+  switch (state) {
+    case "filled":
+    case "partial":
+      return "Filled";
+    case "cancelled":
+    case "rejected":
+      return "Cancelled";
+    default:
+      return "Working";
   }
-  const winRate = totalTrades > 0 ? 52 + (seed % 20) : 0;
-  const pnl = instPositions.reduce((sum, p) => sum + p.targetPnl, 0);
-  const sharpe = totalTrades > 3 ? (1.2 + (seed % 15) / 10).toFixed(2) : "--";
-  const maxDrawdown = totalTrades > 0 ? -(200 + (seed % 800)) : 0;
-  const avgWin = totalTrades > 0 ? 180 + (seed % 120) : 0;
-  const avgLoss = totalTrades > 0 ? -(120 + (seed % 80)) : 0;
-  const profitFactor = totalTrades > 3 ? (1.1 + (seed % 20) / 10).toFixed(2) : "--";
-
-  return { totalTrades, winRate, pnl, sharpe, maxDrawdown, avgWin, avgLoss, profitFactor };
 };
 
-const runKey = (r: AlgoRun) => r.instance_id;
-
-export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[], dataSources: DataSource[]): TradingSimulation => {
+export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _dataSources: DataSource[]): TradingSimulation => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<SimOrder[]>([]);
   const [pnlHistory, setPnlHistory] = useState<number[]>([0]);
   const nextOrderId = useRef(1);
-  const prevRunKeysRef = useRef<Set<string>>(new Set());
 
-  // dataSources kept for future use; suppress unused lint
-  void dataSources;
-
-  const runningAlgos = algos.filter((a) => activeRuns.some((r) => r.algo_id === a.id));
-  const getAlgoName = (id: number) => algos.find((a) => a.id === id)?.name ?? "unknown";
-
-  // When an algo starts on an account: seed initial positions + entry orders
-  // When an algo stops on an account: close its positions + add exit orders
+  // Listen for position updates from NinjaTrader
   useEffect(() => {
-    const currentKeys = new Set(activeRuns.map(runKey));
-    const prevKeys = prevRunKeysRef.current;
+    const unlisten = listen<PositionEvent>("nt-position", (event) => {
+      const p = event.payload;
 
-    // Newly started runs
-    const startedKeys = [...currentKeys].filter((k) => !prevKeys.has(k));
-    const stoppedKeys = [...prevKeys].filter((k) => !currentKeys.has(k));
-
-    const started = startedKeys.map((k) => {
-      const run = activeRuns.find((r) => r.instance_id === k);
-      return run ? { algoId: run.algo_id, account: run.account, dataSourceId: run.data_source_id, instanceId: run.instance_id } : null;
-    }).filter(Boolean) as { algoId: number; account: string; dataSourceId: string; instanceId: string }[];
-
-    const stopped = stoppedKeys.map((k) => {
-      // The run is no longer in activeRuns, so we look up the instance_id from positions/orders
-      // or reconstruct from the key (which IS the instance_id)
-      return { instanceId: k };
-    });
-
-    if (started.length > 0) {
-      const newPositions: Position[] = [];
-      const newOrders: SimOrder[] = [];
-      const now = new Date();
-
-      for (const { algoId, account, dataSourceId, instanceId } of started) {
-        const algoName = getAlgoName(algoId);
-        const symbol = getSymbolFromDataSource(dataSourceId);
-
-        const base = basePrices[symbol] ?? 100;
-        const side = randomFrom(["Long", "Short"] as const);
-        const price = parseFloat(formatPrice(symbol, base + randomBetween(-3, 3)));
-        const qty = Math.ceil(Math.random() * 4);
-        const pnl = randomBetween(-50, 100);
-
-        newPositions.push({
-          symbol, side, qty, avgPrice: price, pnl, targetPnl: pnl,
-          algo: algoName, algoId, account, dataSourceId, instanceId,
-        });
-
-        newOrders.push({
-          id: nextOrderId.current++, time: formatTime(now),
-          symbol, side: side === "Long" ? "Buy" : "Sell", qty, price,
-          status: "Filled", algo: algoName, algoId, account, dataSourceId, instanceId,
-        });
+      if (p.direction === "Flat" || p.qty === 0) {
+        // Position closed — remove it
+        setPositions((prev) => prev.filter(
+          (pos) => !(pos.dataSourceId === p.source_id && pos.symbol === p.symbol)
+        ));
+        return;
       }
 
-      setPositions((prev) => [...prev, ...newPositions]);
-      setOrders((prev) => [...newOrders, ...prev].slice(0, 100));
-    }
-
-    if (stopped.length > 0) {
-      const exitOrders: SimOrder[] = [];
-      const now = new Date();
+      const side: "Long" | "Short" = p.direction === "Long" ? "Long" : "Short";
+      const newPos: Position = {
+        symbol: p.symbol,
+        side,
+        qty: Math.abs(p.qty),
+        avgPrice: p.avg_price,
+        pnl: p.unrealized_pnl,
+        targetPnl: p.unrealized_pnl,
+        algo: "",
+        algoId: 0,
+        account: p.account,
+        dataSourceId: p.source_id,
+        instanceId: "",
+      };
 
       setPositions((prev) => {
-        const closing = prev.filter((p) =>
-          stopped.some((s) => s.instanceId === p.instanceId)
+        const idx = prev.findIndex(
+          (pos) => pos.dataSourceId === p.source_id && pos.symbol === p.symbol
         );
-        for (const pos of closing) {
-          const base = basePrices[pos.symbol] ?? 100;
-          exitOrders.push({
-            id: nextOrderId.current++, time: formatTime(now),
-            symbol: pos.symbol, side: pos.side === "Long" ? "Sell" : "Buy",
-            qty: pos.qty, price: parseFloat(formatPrice(pos.symbol, base + randomBetween(-2, 2))),
-            status: "Filled", algo: pos.algo, algoId: pos.algoId, account: pos.account,
-            dataSourceId: pos.dataSourceId, instanceId: pos.instanceId,
-          });
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = newPos;
+          return next;
         }
-        return prev.filter((p) =>
-          !stopped.some((s) => s.instanceId === p.instanceId)
-        );
+        return [...prev, newPos];
       });
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
 
-      if (exitOrders.length > 0) {
-        setOrders((prev) => [...exitOrders, ...prev].slice(0, 100));
-      }
-
-      // Clean up per-run P&L histories for stopped runs
-      setRunPnlHistories((prev) => {
-        const next = { ...prev };
-        for (const { instanceId } of stopped) {
-          delete next[instanceId];
-        }
-        return next;
-      });
-    }
-
-    prevRunKeysRef.current = currentKeys;
-  }, [activeRuns, algos]);
-
-  // Jitter P&L targets for running positions
+  // Listen for order updates from NinjaTrader
   useEffect(() => {
-    if (runningAlgos.length === 0) return;
-    const interval = setInterval(() => {
-      setPositions((prev) =>
-        prev.map((p) => ({
-          ...p,
-          targetPnl: p.targetPnl + randomBetween(-15, 15),
-        }))
-      );
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [runningAlgos.length]);
+    const unlisten = listen<OrderEvent>("nt-order-update", (event) => {
+      const o = event.payload;
+      const status = mapOrderStatus(o.state);
 
-  const [runPnlHistories, setRunPnlHistories] = useState<Record<string, number[]>>({});
-
-  // Add P&L chart points (aggregate + per-run)
-  useEffect(() => {
-    if (activeRuns.length === 0) return;
-    const interval = setInterval(() => {
-      const runDrifts: Record<string, number> = {};
-      let totalDrift = 0;
-      for (const run of activeRuns) {
-        const key = runKey(run);
-        const drift = randomBetween(-15, 18);
-        runDrifts[key] = drift;
-        totalDrift += drift;
-      }
-
-      setPnlHistory((prev) => {
-        const last = prev[prev.length - 1] ?? 0;
-        return [...prev.slice(-119), Math.round((last + totalDrift) * 100) / 100];
-      });
-
-      setRunPnlHistories((prev) => {
-        const next = { ...prev };
-        for (const run of activeRuns) {
-          const key = runKey(run);
-          const history = next[key] ?? [0];
-          const last = history[history.length - 1] ?? 0;
-          next[key] = [...history.slice(-119), Math.round((last + runDrifts[key]) * 100) / 100];
+      setOrders((prev) => {
+        const idx = prev.findIndex((ord) => ord.instanceId === o.order_id);
+        if (idx >= 0) {
+          // Update existing order
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            status,
+            qty: o.filled_qty ?? next[idx].qty,
+            price: o.fill_price ?? o.avg_fill_price ?? next[idx].price,
+          };
+          return next;
         }
-        return next;
+        // New order
+        const newOrder: SimOrder = {
+          id: nextOrderId.current++,
+          time: formatTime(o.timestamp),
+          symbol: o.symbol,
+          side: "Buy", // Will be updated when we have direction info
+          qty: o.filled_qty ?? o.remaining ?? 0,
+          price: o.fill_price ?? o.avg_fill_price ?? 0,
+          status,
+          algo: "",
+          algoId: 0,
+          account: o.account,
+          dataSourceId: o.source_id,
+          instanceId: o.order_id,
+        };
+        return [newOrder, ...prev].slice(0, 200);
+      });
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
+
+  // Remove positions/orders when a chart disconnects
+  useEffect(() => {
+    const unlisten = listen<string>("nt-chart-removed", (event) => {
+      const removedId = event.payload;
+      setPositions((prev) => prev.filter((p) => p.dataSourceId !== removedId));
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
+
+  // Sample P&L history every 2 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPositions((currentPositions) => {
+        const unrealizedPnl = currentPositions.reduce((sum, p) => sum + p.pnl, 0);
+        if (currentPositions.length > 0 || pnlHistory.length > 1) {
+          setPnlHistory((prev) => [...prev.slice(-119), Math.round(unrealizedPnl * 100) / 100]);
+        }
+        return currentPositions;
       });
     }, 2000);
     return () => clearInterval(interval);
-  }, [activeRuns.length]);
+  }, [pnlHistory.length]);
 
-  // Simulate active trading: open new positions, close existing ones, generate orders
-  useEffect(() => {
-    if (runningAlgos.length === 0) return;
-
-    // Close a position (with exit order)
-    const closeInterval = setInterval(() => {
-      setPositions((prev) => {
-        if (prev.length <= runningAlgos.length) return prev; // keep at least 1 per algo
-        const idx = Math.floor(Math.random() * prev.length);
-        const pos = prev[idx];
-        const instanceCount = prev.filter((p) => p.instanceId === pos.instanceId).length;
-        if (instanceCount <= 1) return prev; // don't close last position for an instance
-
-        const base = basePrices[pos.symbol] ?? 100;
-        const exitPrice = parseFloat(formatPrice(pos.symbol, base + randomBetween(-3, 3)));
-        const exitOrder: SimOrder = {
-          id: nextOrderId.current++,
-          time: formatTime(new Date()),
-          symbol: pos.symbol,
-          side: pos.side === "Long" ? "Sell" : "Buy",
-          qty: pos.qty,
-          price: exitPrice,
-          status: "Filled",
-          algo: pos.algo,
-          algoId: pos.algoId,
-          account: pos.account,
-          dataSourceId: pos.dataSourceId,
-          instanceId: pos.instanceId,
-        };
-        setOrders((o) => [exitOrder, ...o].slice(0, 100));
-        return prev.filter((_, i) => i !== idx);
-      });
-    }, 4000 + Math.random() * 2000);
-
-    // Open a new position (with entry order)
-    const openInterval = setInterval(() => {
-      if (activeRuns.length === 0) return;
-      const run = randomFrom(activeRuns);
-      const algo = algos.find((a) => a.id === run.algo_id);
-      if (!algo) return;
-      const symbol = getSymbolFromDataSource(run.data_source_id);
-      setPositions((prev) => {
-        const runPositions = prev.filter((p) => p.instanceId === run.instance_id);
-        if (runPositions.length >= 4) return prev;
-
-        const base = basePrices[symbol] ?? 100;
-        const side = randomFrom(["Long", "Short"] as const);
-        const price = parseFloat(formatPrice(symbol, base + randomBetween(-3, 3)));
-        const qty = Math.ceil(Math.random() * 4);
-        const pnl = randomBetween(-30, 30);
-
-        const entryOrder: SimOrder = {
-          id: nextOrderId.current++, time: formatTime(new Date()),
-          symbol, side: side === "Long" ? "Buy" : "Sell", qty, price,
-          status: "Filled", algo: algo.name, algoId: algo.id, account: run.account,
-          dataSourceId: run.data_source_id, instanceId: run.instance_id,
-        };
-        setOrders((o) => [entryOrder, ...o].slice(0, 100));
-
-        return [
-          ...prev,
-          { symbol, side, qty, avgPrice: price, pnl, targetPnl: pnl, algo: algo.name, algoId: algo.id, account: run.account,
-            dataSourceId: run.data_source_id, instanceId: run.instance_id },
-        ];
-      });
-    }, 5000 + Math.random() * 3000);
-
-    // Occasional working orders that don't result in positions (limit orders, cancels)
-    const workingInterval = setInterval(() => {
-      if (activeRuns.length === 0) return;
-      const run = randomFrom(activeRuns);
-      const algo = algos.find((a) => a.id === run.algo_id);
-      if (!algo) return;
-      const symbol = getSymbolFromDataSource(run.data_source_id);
-      const base = basePrices[symbol] ?? 100;
-      const status = randomFrom(["Working", "Working", "Cancelled"] as const);
-
-      const order: SimOrder = {
-        id: nextOrderId.current++, time: formatTime(new Date()),
-        symbol, side: randomFrom(["Buy", "Sell"] as const),
-        qty: Math.ceil(Math.random() * 3),
-        price: parseFloat(formatPrice(symbol, base + randomBetween(-8, 8))),
-        status, algo: algo.name, algoId: algo.id, account: run.account,
-        dataSourceId: run.data_source_id, instanceId: run.instance_id,
-      };
-      setOrders((o) => [order, ...o].slice(0, 100));
-    }, 6000 + Math.random() * 4000);
-
-    return () => {
-      clearInterval(closeInterval);
-      clearInterval(openInterval);
-      clearInterval(workingInterval);
-    };
-  }, [runningAlgos]);
-
-  // Compute aggregate stats
-  const realizedPnl = pnlHistory[pnlHistory.length - 1] ?? 0;
-  const unrealizedPnl = positions.reduce((sum, p) => sum + p.targetPnl, 0);
-  const totalPnl = realizedPnl + unrealizedPnl;
+  // Compute stats from real data
+  const unrealizedPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
   const filledOrders = orders.filter((o) => o.status === "Filled");
   const totalTrades = filledOrders.length;
-  const wins = Math.ceil(totalTrades * 0.58);
-  const losses = totalTrades - wins;
-  const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 100) : 0;
+  const realizedPnl = pnlHistory[pnlHistory.length - 1] ?? 0;
+  const totalPnl = realizedPnl + unrealizedPnl;
   const maxDrawdown = pnlHistory.length > 0 ? Math.min(...pnlHistory, 0) : 0;
+
   const sharpe = pnlHistory.length > 2
     ? (() => {
         const returns = pnlHistory.slice(1).map((v, i) => v - pnlHistory[i]);
@@ -427,38 +281,31 @@ export const useTradingSimulation = (algos: Algo[], activeRuns: AlgoRun[], dataS
       })()
     : "--";
 
-  // Simulated per-trade P&L for detailed metrics (seeded from trade count)
-  const seed = totalTrades * 13;
-  const avgWin = totalTrades > 0 ? 145 + (seed % 80) : 0;
-  const avgLoss = totalTrades > 0 ? -(95 + (seed % 50)) : 0;
-  const largestWin = totalTrades > 0 ? avgWin * 2.8 : 0;
-  const largestLoss = totalTrades > 0 ? avgLoss * 2.2 : 0;
-  const profitFactor = totalTrades > 3 && losses > 0
-    ? ((wins * avgWin) / (losses * Math.abs(avgLoss))).toFixed(2)
-    : "--";
-  const openPositions = positions.length;
-  const avgTradeDuration = totalTrades > 0
-    ? `${Math.floor(2 + (seed % 8))}m ${Math.floor(seed % 60)}s`
-    : "--";
-  const consecutiveWins = totalTrades > 0 ? 2 + (seed % 5) : 0;
-  const consecutiveLosses = totalTrades > 0 ? 1 + (seed % 3) : 0;
-
-  // Per-instance stats
-  const algoStats: Record<string, AlgoStats> = {};
-  for (const run of activeRuns) {
-    algoStats[run.instance_id] = computeInstanceStats(run.instance_id, orders, positions);
-  }
-
   return {
     positions,
     orders,
     pnlHistory,
-    runPnlHistories,
+    runPnlHistories: {},
     stats: {
-      realizedPnl, unrealizedPnl, totalPnl, winRate, totalTrades, wins, losses,
-      maxDrawdown, sharpe, profitFactor, avgWin, avgLoss, largestWin, largestLoss,
-      openPositions, avgTradeDuration, consecutiveWins, consecutiveLosses,
+      realizedPnl,
+      unrealizedPnl,
+      totalPnl,
+      winRate: 0,
+      totalTrades,
+      wins: 0,
+      losses: 0,
+      maxDrawdown,
+      sharpe,
+      profitFactor: "--",
+      avgWin: 0,
+      avgLoss: 0,
+      largestWin: 0,
+      largestLoss: 0,
+      openPositions: positions.length,
+      avgTradeDuration: "--",
+      consecutiveWins: 0,
+      consecutiveLosses: 0,
     },
-    algoStats,
+    algoStats: {},
   };
 };

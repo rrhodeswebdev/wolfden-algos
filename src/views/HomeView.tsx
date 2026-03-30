@@ -45,24 +45,15 @@ type SessionStats = {
   consecutiveLosses: number;
 };
 
-type Account = {
-  id: string;
-  name: string;
-  broker: string;
-  balance: number;
+type AccountData = {
+  buying_power: number;
+  cash: number;
+  realized_pnl: number;
 };
-
-// Dummy accounts — will be replaced with real NinjaTrader account data
-const DUMMY_ACCOUNTS: Account[] = [
-  { id: "demo-1", name: "Demo-1", broker: "NinjaTrader", balance: 100000.00 },
-  { id: "demo-2", name: "Demo-2", broker: "NinjaTrader", balance: 50000.00 },
-  { id: "demo-3", name: "Demo-3", broker: "NinjaTrader", balance: 50000.00 },
-  { id: "demo-4", name: "Demo-4", broker: "NinjaTrader", balance: 150000.00 },
-  { id: "demo-5", name: "Demo-5", broker: "NinjaTrader", balance: 150000.00 },
-];
 
 type HomeViewProps = {
   connectionStatus: "waiting" | "connected" | "error";
+  accounts: Record<string, AccountData>;
   algos: Algo[];
   activeRuns: AlgoRun[];
   stats: SessionStats;
@@ -77,7 +68,8 @@ const formatPnl = (value: number) => {
 const pnlColor = (value: number) =>
   value >= 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]";
 
-export const HomeView = ({ connectionStatus, algos, activeRuns, stats, positions }: HomeViewProps) => {
+export const HomeView = ({ connectionStatus, accounts, algos, activeRuns, stats, positions }: HomeViewProps) => {
+  const accountNames = Object.keys(accounts);
   const hasActivity = activeRuns.length > 0;
   const t = stats.totalTrades;
 
@@ -135,50 +127,54 @@ export const HomeView = ({ connectionStatus, algos, activeRuns, stats, positions
           </h2>
 
           <div className="space-y-3">
-            {DUMMY_ACCOUNTS.map((account) => (
-              <div
-                key={account.id}
-                className="p-4 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)]"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        isAccountActive(account.name)
-                          ? "bg-[var(--accent-green)]"
-                          : "bg-[var(--border)]"
-                      }`}
-                    />
-                    <span className="text-sm font-medium">{account.name}</span>
+            {accountNames.length === 0 ? (
+              <p className="text-sm text-[var(--text-secondary)]">
+                No accounts connected
+              </p>
+            ) : accountNames.map((name) => {
+              const data = accounts[name];
+              const balance = data.cash || data.buying_power;
+              const dayPnl = data.realized_pnl + accountPnl(name);
+              return (
+                <div
+                  key={name}
+                  className="p-4 rounded-lg bg-[var(--bg-panel)] border border-[var(--border)]"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          isAccountActive(name)
+                            ? "bg-[var(--accent-green)]"
+                            : "bg-[var(--border)]"
+                        }`}
+                      />
+                      <span className="text-sm font-medium">{name}</span>
+                    </div>
+                    <span className="text-[10px] uppercase text-[var(--text-secondary)]">
+                      NinjaTrader
+                    </span>
                   </div>
-                  <span className="text-[10px] uppercase text-[var(--text-secondary)]">
-                    {account.broker}
-                  </span>
-                </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Balance</div>
-                    <div className="text-sm font-medium">${(account.balance + accountPnl(account.name)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Day P&L</div>
-                    {(() => {
-                      const pnl = accountPnl(account.name);
-                      return (
-                        <div className={`text-sm font-medium ${pnl !== 0 ? pnlColor(pnl) : ""}`}>
-                          {pnl !== 0 ? formatPnl(pnl) : "$0.00"}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Positions</div>
-                    <div className="text-sm font-medium">{accountPositionCount(account.name)}</div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Balance</div>
+                      <div className="text-sm font-medium">${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Day P&L</div>
+                      <div className={`text-sm font-medium ${dayPnl !== 0 ? pnlColor(dayPnl) : ""}`}>
+                        {dayPnl !== 0 ? formatPnl(dayPnl) : "$0.00"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Positions</div>
+                      <div className="text-sm font-medium">{accountPositionCount(name)}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
