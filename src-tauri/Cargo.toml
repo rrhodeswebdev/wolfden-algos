@@ -44,3 +44,6 @@ log = "0.4"
 
 # Unique IDs for orders
 uuid = { version = "1", features = ["v4"] }
+
+# Byte buffers (used by ZMQ messages)
+bytes = "1"

@@ -88,6 +88,14 @@ impl ConnectionRegistry {
     pub fn get_sender(&self, source_id: &str) -> Option<&mpsc::Sender<NtOutbound>> {
         self.connections.get(source_id)
     }
+
+    /// Find a sender by matching symbol prefix (e.g. "ES 09-26" matches "ES 09-26:5min").
+    /// Returns the first match if multiple connections share the same instrument.
+    pub fn find_sender_by_symbol(&self, symbol: &str) -> Option<&mpsc::Sender<NtOutbound>> {
+        self.connections.iter()
+            .find(|(source_id, _)| source_id.starts_with(symbol))
+            .map(|(_, sender)| sender)
+    }
 }
 
 /// Starts the WebSocket server that NinjaTrader connects to.

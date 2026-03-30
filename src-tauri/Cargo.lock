@@ -5431,6 +5431,7 @@ dependencies = [
 name = "wolf-den"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "futures-util",
  "log",
  "rmp-serde",
