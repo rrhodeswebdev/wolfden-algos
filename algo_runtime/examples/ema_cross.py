@@ -7,7 +7,7 @@ Trailing stop activates after price moves 1 ATR in favorable direction.
 Pure functional style — all state flows through immutable transforms.
 """
 
-from wolf_types import Tick, Bar, Fill, Order, AlgoResult, BracketOrder, market_buy, market_sell, stop_buy, stop_sell, limit_buy, limit_sell, bracket
+from wolf_types import AlgoResult, market_buy, market_sell
 
 
 def create_algo(
@@ -29,8 +29,6 @@ def create_algo(
             "highs": (),
             "lows": (),
             "closes": (),
-            "position": 0,
-            "entry_price": 0.0,
             "stop_price": 0.0,
             "target_price": 0.0,
             "trail_active": False,
@@ -63,7 +61,7 @@ def create_algo(
             atr_val = tr * k + atr_val * (1 - k)
         return atr_val
 
-    def on_tick(state: dict, tick: Tick) -> AlgoResult:
+    def on_tick(state, tick, ctx):
         prices = (*state["prices"], tick.price)[-(slow_period + 5):]
         ticks_since = state["ticks_since_last_trade"] + 1
         new_state = {**state, "prices": prices, "ticks_since_last_trade": ticks_since}
@@ -94,25 +92,23 @@ def create_algo(
         else:
             return AlgoResult(new_state, ())
 
-        position = state["position"]
+        position = ctx.position
         orders = ()
 
         # --- Position management ---
 
         if position != 0:
             direction = 1 if position > 0 else -1
-            entry = state["entry_price"]
+            entry = ctx.entry_price
             stop = state["stop_price"]
             target = state["target_price"]
             best = state["best_price"]
 
-            # Update best price for trailing stop
             if direction == 1:
                 best = max(best, tick.price)
             else:
                 best = min(best, tick.price)
 
-            # Check trailing stop activation
             atr_val = _compute_atr(state["highs"], state["lows"], state["closes"])
             trail_active = state["trail_active"]
             favorable_move = (best - entry) * direction
@@ -123,78 +119,50 @@ def create_algo(
             if trail_active and atr_val > 0:
                 trail_dist = atr_val * trail_distance_atr
                 if direction == 1:
-                    new_stop = best - trail_dist
-                    stop = max(stop, new_stop)
+                    stop = max(stop, best - trail_dist)
                 else:
-                    new_stop = best + trail_dist
-                    stop = min(stop, new_stop)
+                    stop = min(stop, best + trail_dist)
 
-            # Check stop hit
+            flat_state = {**new_state, "stop_price": 0.0, "target_price": 0.0,
+                         "trail_active": False, "best_price": 0.0,
+                         "ticks_since_last_trade": 0}
+
+            # Stop hit
             if direction == 1 and tick.price <= stop:
-                orders = (market_sell(tick.symbol, abs(position)),)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "trail_active": False, "best_price": 0.0,
-                             "ticks_since_last_trade": 0}
                 pnl = (tick.price - entry) * abs(position) * 50.0
-                new_state = {**new_state, "daily_pnl": state["daily_pnl"] + pnl}
-                if new_state["daily_pnl"] <= -max_daily_loss:
-                    new_state = {**new_state, "daily_halted": True}
-                return AlgoResult(new_state, orders)
+                flat_state = {**flat_state, "daily_pnl": state["daily_pnl"] + pnl}
+                if flat_state["daily_pnl"] <= -max_daily_loss:
+                    flat_state = {**flat_state, "daily_halted": True}
+                return AlgoResult(flat_state, (market_sell(abs(position)),))
 
             if direction == -1 and tick.price >= stop:
-                orders = (market_buy(tick.symbol, abs(position)),)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "trail_active": False, "best_price": 0.0,
-                             "ticks_since_last_trade": 0}
                 pnl = (entry - tick.price) * abs(position) * 50.0
-                new_state = {**new_state, "daily_pnl": state["daily_pnl"] + pnl}
-                if new_state["daily_pnl"] <= -max_daily_loss:
-                    new_state = {**new_state, "daily_halted": True}
-                return AlgoResult(new_state, orders)
+                flat_state = {**flat_state, "daily_pnl": state["daily_pnl"] + pnl}
+                if flat_state["daily_pnl"] <= -max_daily_loss:
+                    flat_state = {**flat_state, "daily_halted": True}
+                return AlgoResult(flat_state, (market_buy(abs(position)),))
 
-            # Check target hit
+            # Target hit
             if direction == 1 and tick.price >= target:
-                orders = (market_sell(tick.symbol, abs(position)),)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "trail_active": False, "best_price": 0.0,
-                             "ticks_since_last_trade": 0}
                 pnl = (tick.price - entry) * abs(position) * 50.0
-                new_state = {**new_state, "daily_pnl": state["daily_pnl"] + pnl}
-                return AlgoResult(new_state, orders)
+                flat_state = {**flat_state, "daily_pnl": state["daily_pnl"] + pnl}
+                return AlgoResult(flat_state, (market_sell(abs(position)),))
 
             if direction == -1 and tick.price <= target:
-                orders = (market_buy(tick.symbol, abs(position)),)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "trail_active": False, "best_price": 0.0,
-                             "ticks_since_last_trade": 0}
                 pnl = (entry - tick.price) * abs(position) * 50.0
-                new_state = {**new_state, "daily_pnl": state["daily_pnl"] + pnl}
-                return AlgoResult(new_state, orders)
+                flat_state = {**flat_state, "daily_pnl": state["daily_pnl"] + pnl}
+                return AlgoResult(flat_state, (market_buy(abs(position)),))
 
             # Opposite crossover exit
             if direction == 1 and fast_ema < slow_ema and prev_fast >= prev_slow:
-                orders = (market_sell(tick.symbol, abs(position)),)
                 pnl = (tick.price - entry) * abs(position) * 50.0
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "trail_active": False, "best_price": 0.0,
-                             "ticks_since_last_trade": 0,
-                             "daily_pnl": state["daily_pnl"] + pnl}
-                return AlgoResult(new_state, orders)
+                flat_state = {**flat_state, "daily_pnl": state["daily_pnl"] + pnl}
+                return AlgoResult(flat_state, (market_sell(abs(position)),))
 
             if direction == -1 and fast_ema > slow_ema and prev_fast <= prev_slow:
-                orders = (market_buy(tick.symbol, abs(position)),)
                 pnl = (entry - tick.price) * abs(position) * 50.0
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "trail_active": False, "best_price": 0.0,
-                             "ticks_since_last_trade": 0,
-                             "daily_pnl": state["daily_pnl"] + pnl}
-                return AlgoResult(new_state, orders)
+                flat_state = {**flat_state, "daily_pnl": state["daily_pnl"] + pnl}
+                return AlgoResult(flat_state, (market_buy(abs(position)),))
 
             new_state = {**new_state, "stop_price": stop, "trail_active": trail_active, "best_price": best}
             return AlgoResult(new_state, ())
@@ -214,33 +182,26 @@ def create_algo(
         if cross_above and tick.price > slow_ema:
             stop = tick.price - atr_val * stop_atr_mult
             target = tick.price + atr_val * target_atr_mult
-            orders = (market_buy(tick.symbol, 1),)
-            new_state = {**new_state, "position": 1, "entry_price": tick.price,
-                         "stop_price": stop, "target_price": target,
+            new_state = {**new_state, "stop_price": stop, "target_price": target,
                          "trail_active": False, "best_price": tick.price,
                          "ticks_since_last_trade": 0}
-            return AlgoResult(new_state, orders)
+            return AlgoResult(new_state, (market_buy(1),))
 
         if cross_below and tick.price < slow_ema:
             stop = tick.price + atr_val * stop_atr_mult
             target = tick.price - atr_val * target_atr_mult
-            orders = (market_sell(tick.symbol, 1),)
-            new_state = {**new_state, "position": -1, "entry_price": tick.price,
-                         "stop_price": stop, "target_price": target,
+            new_state = {**new_state, "stop_price": stop, "target_price": target,
                          "trail_active": False, "best_price": tick.price,
                          "ticks_since_last_trade": 0}
-            return AlgoResult(new_state, orders)
+            return AlgoResult(new_state, (market_sell(1),))
 
         return AlgoResult(new_state, ())
 
-    def on_bar(state: dict, bar: Bar) -> AlgoResult:
+    def on_bar(state, bar, ctx):
         highs = (*state["highs"], bar.h)[-(atr_period + 2):]
         lows = (*state["lows"], bar.l)[-(atr_period + 2):]
         closes = (*state["closes"], bar.c)[-(atr_period + 2):]
         new_state = {**state, "highs": highs, "lows": lows, "closes": closes}
         return AlgoResult(new_state, ())
 
-    def on_fill(state: dict, fill: Fill) -> AlgoResult:
-        return AlgoResult(state, ())
-
-    return {"init": init, "on_tick": on_tick, "on_bar": on_bar, "on_fill": on_fill}
+    return {"init": init, "on_tick": on_tick, "on_bar": on_bar}

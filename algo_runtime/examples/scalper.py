@@ -7,7 +7,7 @@ Designed for liquid futures on 1-minute bars.
 Pure functional style — all state flows through immutable transforms.
 """
 
-from wolf_types import Tick, Bar, Fill, Order, AlgoResult, market_buy, market_sell
+from wolf_types import AlgoResult, market_buy, market_sell
 
 
 def create_algo(
@@ -39,8 +39,6 @@ def create_algo(
             "volumes": (),
             "highs": (),
             "lows": (),
-            "position": 0,
-            "entry_price": 0.0,
             "stop_price": 0.0,
             "target_price": 0.0,
             "breakeven_set": False,
@@ -114,21 +112,21 @@ def create_algo(
         wins = sum(1 for r in recent if r > 0)
         return (wins / tilt_lookback) < tilt_min_win_rate
 
-    def on_tick(state: dict, tick: Tick) -> AlgoResult:
+    def on_tick(state, tick, ctx):
         tick_count = state["tick_count"] + 1
         new_state = {**state, "tick_count": tick_count}
 
         if state["daily_halted"]:
             return AlgoResult(new_state, ())
 
-        position = state["position"]
+        position = ctx.position
 
         # --- Position management ---
 
         if position != 0:
             direction = 1 if position > 0 else -1
             ticks_in_trade = state["ticks_in_trade"] + 1
-            entry = state["entry_price"]
+            entry = ctx.entry_price
             stop = state["stop_price"]
             target = state["target_price"]
             best = state["best_price"]
@@ -140,22 +138,23 @@ def create_algo(
 
             new_state = {**new_state, "ticks_in_trade": ticks_in_trade, "best_price": best}
 
+            flat_state = {**new_state, "stop_price": 0.0, "target_price": 0.0,
+                         "breakeven_set": False, "best_price": 0.0,
+                         "ticks_in_trade": 0}
+
             # Time exit
             if ticks_in_trade >= max_hold_ticks:
                 if direction == 1:
-                    orders = (market_sell(tick.symbol, abs(position)),)
+                    orders = (market_sell(abs(position)),)
                 else:
-                    orders = (market_buy(tick.symbol, abs(position)),)
+                    orders = (market_buy(abs(position)),)
                 pnl = (tick.price - entry) * direction * abs(position) * 50.0
                 results = (*state["trade_results"], pnl)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "breakeven_set": False, "best_price": 0.0,
-                             "ticks_in_trade": 0, "trade_results": results,
+                flat_state = {**flat_state, "trade_results": results,
                              "daily_pnl": state["daily_pnl"] + pnl}
-                if new_state["daily_pnl"] <= -max_daily_loss:
-                    new_state = {**new_state, "daily_halted": True}
-                return AlgoResult(new_state, orders)
+                if flat_state["daily_pnl"] <= -max_daily_loss:
+                    flat_state = {**flat_state, "daily_halted": True}
+                return AlgoResult(flat_state, orders)
 
             # Breakeven stop
             atr_val = _compute_atr(state["highs"], state["lows"], state["closes"])
@@ -173,59 +172,43 @@ def create_algo(
 
             # Stop loss
             if direction == 1 and tick.price <= stop:
-                orders = (market_sell(tick.symbol, abs(position)),)
                 pnl = (tick.price - entry) * abs(position) * 50.0
                 results = (*state["trade_results"], pnl)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "breakeven_set": False, "best_price": 0.0,
-                             "ticks_in_trade": 0, "trade_results": results,
+                flat_state = {**flat_state, "trade_results": results,
                              "daily_pnl": state["daily_pnl"] + pnl}
-                if new_state["daily_pnl"] <= -max_daily_loss:
-                    new_state = {**new_state, "daily_halted": True}
-                return AlgoResult(new_state, orders)
+                if flat_state["daily_pnl"] <= -max_daily_loss:
+                    flat_state = {**flat_state, "daily_halted": True}
+                return AlgoResult(flat_state, (market_sell(abs(position)),))
 
             if direction == -1 and tick.price >= stop:
-                orders = (market_buy(tick.symbol, abs(position)),)
                 pnl = (entry - tick.price) * abs(position) * 50.0
                 results = (*state["trade_results"], pnl)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "breakeven_set": False, "best_price": 0.0,
-                             "ticks_in_trade": 0, "trade_results": results,
+                flat_state = {**flat_state, "trade_results": results,
                              "daily_pnl": state["daily_pnl"] + pnl}
-                if new_state["daily_pnl"] <= -max_daily_loss:
-                    new_state = {**new_state, "daily_halted": True}
-                return AlgoResult(new_state, orders)
+                if flat_state["daily_pnl"] <= -max_daily_loss:
+                    flat_state = {**flat_state, "daily_halted": True}
+                return AlgoResult(flat_state, (market_buy(abs(position)),))
 
             # Take profit
             if direction == 1 and tick.price >= target:
-                orders = (market_sell(tick.symbol, abs(position)),)
                 pnl = (tick.price - entry) * abs(position) * 50.0
                 results = (*state["trade_results"], pnl)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "breakeven_set": False, "best_price": 0.0,
-                             "ticks_in_trade": 0, "trade_results": results,
+                flat_state = {**flat_state, "trade_results": results,
                              "daily_pnl": state["daily_pnl"] + pnl}
-                return AlgoResult(new_state, orders)
+                return AlgoResult(flat_state, (market_sell(abs(position)),))
 
             if direction == -1 and tick.price <= target:
-                orders = (market_buy(tick.symbol, abs(position)),)
                 pnl = (entry - tick.price) * abs(position) * 50.0
                 results = (*state["trade_results"], pnl)
-                new_state = {**new_state, "position": 0, "entry_price": 0.0,
-                             "stop_price": 0.0, "target_price": 0.0,
-                             "breakeven_set": False, "best_price": 0.0,
-                             "ticks_in_trade": 0, "trade_results": results,
+                flat_state = {**flat_state, "trade_results": results,
                              "daily_pnl": state["daily_pnl"] + pnl}
-                return AlgoResult(new_state, orders)
+                return AlgoResult(flat_state, (market_buy(abs(position)),))
 
             return AlgoResult(new_state, ())
 
         return AlgoResult(new_state, ())
 
-    def on_bar(state: dict, bar: Bar) -> AlgoResult:
+    def on_bar(state, bar, ctx):
         closes = (*state["closes"], bar.c)[-(bb_period + 5):]
         volumes = (*state["volumes"], bar.v)[-(bb_period + 5):]
         highs = (*state["highs"], bar.h)[-(atr_period + 2):]
@@ -240,7 +223,7 @@ def create_algo(
                      "highs": highs, "lows": lows,
                      "cum_tp_vol": cum_tp_vol, "cum_vol": cum_vol}
 
-        if state["daily_halted"] or state["position"] != 0:
+        if state["daily_halted"] or ctx.position != 0:
             return AlgoResult(new_state, ())
 
         if state["session_trades"] >= max_trades_per_session:
@@ -253,7 +236,6 @@ def create_algo(
             new_state = {**new_state, "tilt_paused_until": state["tick_count"] + tilt_pause_ticks}
             return AlgoResult(new_state, ())
 
-        # Need enough data for indicators
         if len(closes) < bb_period:
             return AlgoResult(new_state, ())
 
@@ -271,53 +253,38 @@ def create_algo(
         if atr_val <= 0:
             return AlgoResult(new_state, ())
 
-        # Volatility filter
         bar_range = bar.h - bar.l
         if bar_range > atr_val * 2.0:
             return AlgoResult(new_state, ())
 
-        # Volume spike required
         vol_avg = _compute_sma(volumes, bb_period)
         if vol_avg and bar.v < vol_avg * volume_spike_mult:
             return AlgoResult(new_state, ())
 
         vwap_band = 0.5
 
-        # Long scalp: price at lower BB, near VWAP, RSI oversold
+        # Long scalp
         if bar.c <= bb_lower and bar.c <= vwap_val + vwap_band and rsi_val < 30:
             stop_dist = _clamp(atr_val * stop_atr_mult, min_stop_ticks * tick_size, max_stop_ticks * tick_size)
             target_dist = max(atr_val * target_atr_mult, min_target_ticks * tick_size)
-
-            stop = bar.c - stop_dist
-            target = bar.c + target_dist
-
-            orders = (market_buy(bar.symbol, 1),)
-            new_state = {**new_state, "position": 1, "entry_price": bar.c,
-                         "stop_price": stop, "target_price": target,
+            new_state = {**new_state, "stop_price": bar.c - stop_dist,
+                         "target_price": bar.c + target_dist,
                          "breakeven_set": False, "best_price": bar.c,
                          "ticks_in_trade": 0,
                          "session_trades": state["session_trades"] + 1}
-            return AlgoResult(new_state, orders)
+            return AlgoResult(new_state, (market_buy(1),))
 
-        # Short scalp: price at upper BB, near VWAP, RSI overbought
+        # Short scalp
         if bar.c >= bb_upper and bar.c >= vwap_val - vwap_band and rsi_val > 70:
             stop_dist = _clamp(atr_val * stop_atr_mult, min_stop_ticks * tick_size, max_stop_ticks * tick_size)
             target_dist = max(atr_val * target_atr_mult, min_target_ticks * tick_size)
-
-            stop = bar.c + stop_dist
-            target = bar.c - target_dist
-
-            orders = (market_sell(bar.symbol, 1),)
-            new_state = {**new_state, "position": -1, "entry_price": bar.c,
-                         "stop_price": stop, "target_price": target,
+            new_state = {**new_state, "stop_price": bar.c + stop_dist,
+                         "target_price": bar.c - target_dist,
                          "breakeven_set": False, "best_price": bar.c,
                          "ticks_in_trade": 0,
                          "session_trades": state["session_trades"] + 1}
-            return AlgoResult(new_state, orders)
+            return AlgoResult(new_state, (market_sell(1),))
 
         return AlgoResult(new_state, ())
 
-    def on_fill(state: dict, fill: Fill) -> AlgoResult:
-        return AlgoResult(state, ())
-
-    return {"init": init, "on_tick": on_tick, "on_bar": on_bar, "on_fill": on_fill}
+    return {"init": init, "on_tick": on_tick, "on_bar": on_bar}

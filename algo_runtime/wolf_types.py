@@ -27,6 +27,16 @@ Bar = NamedTuple("Bar", [
 ])
 
 
+# --- Context (provided by runtime) ---
+
+Context = NamedTuple("Context", [
+    ("symbol", str),
+    ("position", int),
+    ("entry_price", float),
+    ("unrealized_pnl", float),
+])
+
+
 # --- Orders ---
 
 Order = NamedTuple("Order", [
@@ -67,37 +77,38 @@ AlgoResult = NamedTuple("AlgoResult", [
 
 
 # --- Convenience constructors ---
+# Symbol defaults to "" — the runtime fills it in automatically.
 
-def market_buy(symbol: str, qty: int) -> Order:
+def market_buy(qty: int, symbol: str = "") -> Order:
     return Order("BUY", symbol, qty, "MARKET", 0.0, 0.0)
 
 
-def market_sell(symbol: str, qty: int) -> Order:
+def market_sell(qty: int, symbol: str = "") -> Order:
     return Order("SELL", symbol, qty, "MARKET", 0.0, 0.0)
 
 
-def limit_buy(symbol: str, qty: int, price: float) -> Order:
+def limit_buy(qty: int, price: float, symbol: str = "") -> Order:
     return Order("BUY", symbol, qty, "LIMIT", price, 0.0)
 
 
-def limit_sell(symbol: str, qty: int, price: float) -> Order:
+def limit_sell(qty: int, price: float, symbol: str = "") -> Order:
     return Order("SELL", symbol, qty, "LIMIT", price, 0.0)
 
 
-def stop_buy(symbol: str, qty: int, stop_price: float) -> Order:
+def stop_buy(qty: int, stop_price: float, symbol: str = "") -> Order:
     return Order("BUY", symbol, qty, "STOP", 0.0, stop_price)
 
 
-def stop_sell(symbol: str, qty: int, stop_price: float) -> Order:
+def stop_sell(qty: int, stop_price: float, symbol: str = "") -> Order:
     return Order("SELL", symbol, qty, "STOP", 0.0, stop_price)
 
 
 def bracket(
-    symbol: str,
     side: str,
     qty: int,
     stop_loss_price: float,
     take_profit_price: float,
+    symbol: str = "",
 ) -> BracketOrder:
     entry = Order(side, symbol, qty, "MARKET", 0.0, 0.0)
     exit_side = "SELL" if side == "BUY" else "BUY"
