@@ -16,6 +16,9 @@ pub struct WsState {
     pub inbound_tx: broadcast::Sender<types::NtInbound>,
 }
 
+/// Shared process manager state for commands to spawn/stop algo processes.
+pub struct ProcState(pub process_manager::ProcessManager);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -41,6 +44,9 @@ pub fn run() {
 
             log::info!("Wolf Den initialized. Database at {:?}", db_path);
 
+            // Initialize process manager
+            app.manage(ProcState(process_manager::ProcessManager::new(data_dir.clone())));
+
             // Start WebSocket server for NinjaTrader connections
             let (inbound_tx, _) = broadcast::channel(256);
             let registry = Arc::new(RwLock::new(websocket_server::ConnectionRegistry::new()));
@@ -52,13 +58,32 @@ pub fn run() {
 
             let port: u16 = 9000;
             let handle = app.handle().clone();
+            let ws_inbound_tx = inbound_tx.clone();
+            let ws_registry = registry.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = websocket_server::start(port, inbound_tx, registry, handle).await {
+                if let Err(e) = websocket_server::start(port, ws_inbound_tx, ws_registry, handle).await {
                     log::error!("WebSocket server error: {}", e);
                 }
             });
 
+            // Start ZMQ PUB socket (market data fan-out to Python algos)
+            let zmq_inbound_rx = inbound_tx.subscribe();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = zmq_hub::start_publisher(zmq_inbound_rx).await {
+                    log::error!("ZMQ publisher error: {}", e);
+                }
+            });
+
+            // Start ZMQ PULL socket (trade signals from Python algos → WebSocket)
+            let pull_registry = registry.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = zmq_hub::start_order_receiver(pull_registry).await {
+                    log::error!("ZMQ order receiver error: {}", e);
+                }
+            });
+
             log::info!("WebSocket server starting on port {}", port);
+            log::info!("ZMQ hub starting (market data + trade signals)");
 
             Ok(())
         })

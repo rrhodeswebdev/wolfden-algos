@@ -1,4 +1,5 @@
 use crate::db::{self, DbState};
+use crate::ProcState;
 use crate::types::{Algo, AlgoInstance, AlgoRun, DataSource, RiskConfig, Session, Trade};
 
 #[tauri::command]
@@ -114,27 +115,23 @@ pub fn create_algo_instance(
 
 #[tauri::command]
 pub fn start_algo_instance(
-    state: tauri::State<DbState>,
+    db_state: tauri::State<DbState>,
+    proc_state: tauri::State<ProcState>,
     instance_id: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-    // TODO: Phase 2 — spawn Python algo process via process manager
-    db::update_algo_instance_status(&conn, &instance_id, "running", None)
-        .map_err(|e| e.to_string())?;
-    log::info!("start_algo_instance called for instance_id={}", instance_id);
+    proc_state.0.start_instance(&db_state, &instance_id)?;
+    log::info!("start_algo_instance: spawned instance_id={}", instance_id);
     Ok(())
 }
 
 #[tauri::command]
 pub fn stop_algo_instance(
-    state: tauri::State<DbState>,
+    db_state: tauri::State<DbState>,
+    proc_state: tauri::State<ProcState>,
     instance_id: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-    // TODO: Phase 2 — kill Python algo process via process manager
-    db::update_algo_instance_status(&conn, &instance_id, "stopped", None)
-        .map_err(|e| e.to_string())?;
-    log::info!("stop_algo_instance called for instance_id={}", instance_id);
+    proc_state.0.stop_instance(&db_state, &instance_id)?;
+    log::info!("stop_algo_instance: stopped instance_id={}", instance_id);
     Ok(())
 }
 
