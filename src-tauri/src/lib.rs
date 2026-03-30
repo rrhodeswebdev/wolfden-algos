@@ -5,7 +5,16 @@ mod zmq_hub;
 mod commands;
 mod types;
 
+use std::sync::Arc;
 use tauri::Manager;
+use tokio::sync::{broadcast, RwLock};
+
+/// Shared WebSocket state so commands can access the connection registry
+/// and inbound broadcast channel.
+pub struct WsState {
+    pub registry: Arc<RwLock<websocket_server::ConnectionRegistry>>,
+    pub inbound_tx: broadcast::Sender<types::NtInbound>,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,6 +40,25 @@ pub fn run() {
             app.manage(db::DbState(std::sync::Mutex::new(db)));
 
             log::info!("Wolf Den initialized. Database at {:?}", db_path);
+
+            // Start WebSocket server for NinjaTrader connections
+            let (inbound_tx, _) = broadcast::channel(256);
+            let registry = Arc::new(RwLock::new(websocket_server::ConnectionRegistry::new()));
+
+            app.manage(WsState {
+                registry: registry.clone(),
+                inbound_tx: inbound_tx.clone(),
+            });
+
+            let port: u16 = 9000;
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = websocket_server::start(port, inbound_tx, registry, handle).await {
+                    log::error!("WebSocket server error: {}", e);
+                }
+            });
+
+            log::info!("WebSocket server starting on port {}", port);
 
             Ok(())
         })

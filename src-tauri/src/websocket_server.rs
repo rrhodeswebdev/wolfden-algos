@@ -6,8 +6,58 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
+use tauri::{AppHandle, Emitter};
+
+use serde::Serialize;
 
 use crate::types::{NtInbound, NtOutbound};
+
+/// Account snapshot emitted to the frontend.
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountSnapshot {
+    pub name: String,
+    pub buying_power: f64,
+    pub cash: f64,
+    pub realized_pnl: f64,
+}
+
+/// Chart info emitted to the frontend when a NinjaTrader chart connects.
+#[derive(Debug, Clone, Serialize)]
+pub struct ChartInfo {
+    pub id: String,
+    pub instrument: String,
+    pub timeframe: String,
+    pub account: String,
+}
+
+/// Position update emitted to the frontend.
+#[derive(Debug, Clone, Serialize)]
+pub struct PositionEvent {
+    pub source_id: String,
+    pub account: String,
+    pub symbol: String,
+    pub direction: String,
+    pub qty: i64,
+    pub avg_price: f64,
+    pub unrealized_pnl: f64,
+}
+
+/// Order update emitted to the frontend.
+#[derive(Debug, Clone, Serialize)]
+pub struct OrderEvent {
+    pub source_id: String,
+    pub account: String,
+    pub instance_id: String,
+    pub order_id: String,
+    pub state: String,
+    pub symbol: String,
+    pub filled_qty: Option<i64>,
+    pub avg_fill_price: Option<f64>,
+    pub fill_price: Option<f64>,
+    pub remaining: Option<i64>,
+    pub error: Option<String>,
+    pub timestamp: Option<i64>,
+}
 
 /// Tracks which WebSocket connection owns which data source,
 /// enabling targeted outbound routing of orders.
@@ -31,6 +81,10 @@ impl ConnectionRegistry {
         self.connections.remove(source_id);
     }
 
+    pub fn connection_count(&self) -> usize {
+        self.connections.len()
+    }
+
     pub fn get_sender(&self, source_id: &str) -> Option<&mpsc::Sender<NtOutbound>> {
         self.connections.get(source_id)
     }
@@ -48,6 +102,7 @@ pub async fn start(
     port: u16,
     inbound_tx: broadcast::Sender<NtInbound>,
     registry: Arc<RwLock<ConnectionRegistry>>,
+    app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     let listener = TcpListener::bind(&addr).await?;
@@ -59,6 +114,7 @@ pub async fn start(
 
         let inbound_tx = inbound_tx.clone();
         let registry = registry.clone();
+        let app_handle = app_handle.clone();
 
         tokio::spawn(async move {
             let ws_stream = match accept_async(stream).await {
@@ -74,9 +130,11 @@ pub async fn start(
             // Per-connection outbound channel for targeted order routing
             let (outbound_tx, mut outbound_rx) = mpsc::channel::<NtOutbound>(64);
 
-            // Track the source_id this connection registered as
+            // Track the source_id and account this connection registered as
             let source_id: Arc<RwLock<Option<String>>> = Arc::new(RwLock::new(None));
             let source_id_for_cleanup = source_id.clone();
+            let account_name: Arc<RwLock<Option<String>>> = Arc::new(RwLock::new(None));
+            let account_name_for_cleanup = account_name.clone();
 
             // Spawn a task to forward outbound messages to this WebSocket
             let outbound_task = tokio::spawn(async move {
@@ -101,15 +159,94 @@ pub async fn start(
                         match serde_json::from_str::<NtInbound>(&text) {
                             Ok(parsed) => {
                                 // On Register, store this connection in the registry
-                                if let NtInbound::Register { ref instrument, ref timeframe, .. } = parsed {
+                                if let NtInbound::Register { ref instrument, ref timeframe, ref account, .. } = parsed {
                                     let sid = format!("{}:{}", instrument, timeframe);
-                                    log::info!("Registering data source: {} from {}", sid, peer_addr);
+                                    log::info!("Registering data source: {} account: {} from {}", sid, account, peer_addr);
 
                                     let mut reg = registry.write().await;
                                     reg.register(sid.clone(), outbound_tx.clone());
+                                    let count = reg.connection_count();
+                                    drop(reg);
+
+                                    let _ = app_handle.emit("nt-connection-count", count);
+
+                                    // Store account name for this connection
+                                    let mut acct_lock = account_name.write().await;
+                                    *acct_lock = Some(account.clone());
+                                    drop(acct_lock);
+
+                                    // Emit initial account snapshot (zeroed until Account message arrives)
+                                    let _ = app_handle.emit("nt-account", AccountSnapshot {
+                                        name: account.clone(),
+                                        buying_power: 0.0,
+                                        cash: 0.0,
+                                        realized_pnl: 0.0,
+                                    });
+
+                                    // Emit chart connected event
+                                    let _ = app_handle.emit("nt-chart", ChartInfo {
+                                        id: sid.clone(),
+                                        instrument: instrument.clone(),
+                                        timeframe: timeframe.clone(),
+                                        account: account.clone(),
+                                    });
 
                                     let mut sid_lock = source_id.write().await;
                                     *sid_lock = Some(sid);
+                                }
+
+                                // On Account update, emit with the connection's account name
+                                if let NtInbound::Account { buying_power, cash, realized_pnl } = &parsed {
+                                    let acct = account_name.read().await;
+                                    if let Some(ref name) = *acct {
+                                        let _ = app_handle.emit("nt-account", AccountSnapshot {
+                                            name: name.clone(),
+                                            buying_power: *buying_power,
+                                            cash: *cash,
+                                            realized_pnl: *realized_pnl,
+                                        });
+                                    }
+                                }
+
+                                // On Position update, emit with connection context
+                                if let NtInbound::Position { ref source_id, ref symbol, ref direction, qty, avg_price, unrealized_pnl } = parsed {
+                                    let acct = account_name.read().await;
+                                    if let Some(ref name) = *acct {
+                                        let _ = app_handle.emit("nt-position", PositionEvent {
+                                            source_id: source_id.clone(),
+                                            account: name.clone(),
+                                            symbol: symbol.clone(),
+                                            direction: direction.clone(),
+                                            qty,
+                                            avg_price,
+                                            unrealized_pnl,
+                                        });
+                                    }
+                                }
+
+                                // On OrderUpdate, emit with connection context
+                                if let NtInbound::OrderUpdate { source_id: ref msg_source_id, ref instance_id, ref order_id, ref state, filled_qty, avg_fill_price, fill_price, remaining, ref error, timestamp } = parsed {
+                                    let acct = account_name.read().await;
+                                    // Get symbol from the connection's source_id (e.g. "ES 09-26:5min" -> "ES 09-26")
+                                    let conn_sid = source_id.read().await;
+                                    let symbol = conn_sid.as_ref().map(|s| s.split(':').next().unwrap_or("").to_string()).unwrap_or_default();
+                                    drop(conn_sid);
+                                    if let Some(ref name) = *acct {
+                                        let _ = app_handle.emit("nt-order-update", OrderEvent {
+                                            source_id: msg_source_id.clone(),
+                                            account: name.clone(),
+                                            instance_id: instance_id.clone(),
+                                            order_id: order_id.clone(),
+                                            state: state.clone(),
+                                            symbol,
+                                            filled_qty,
+                                            avg_fill_price,
+                                            fill_price,
+                                            remaining,
+                                            error: error.clone(),
+                                            timestamp,
+                                        });
+                                    }
                                 }
 
                                 let _ = inbound_tx.send(parsed);
@@ -134,10 +271,21 @@ pub async fn start(
 
             // Cleanup: remove this connection from the registry
             let sid = source_id_for_cleanup.read().await.clone();
-            if let Some(sid) = sid {
+            if let Some(ref sid) = sid {
                 log::info!("Unregistering data source: {}", sid);
                 let mut reg = registry.write().await;
-                reg.unregister(&sid);
+                reg.unregister(sid);
+                let count = reg.connection_count();
+                drop(reg);
+
+                let _ = app_handle.emit("nt-connection-count", count);
+                let _ = app_handle.emit("nt-chart-removed", sid.clone());
+            }
+
+            // Notify frontend that this account disconnected
+            let acct = account_name_for_cleanup.read().await.clone();
+            if let Some(name) = acct {
+                let _ = app_handle.emit("nt-account-removed", name);
             }
 
             outbound_task.abort();
