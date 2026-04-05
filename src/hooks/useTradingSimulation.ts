@@ -73,14 +73,36 @@ export type AlgoStats = {
   avgWin: number;
   avgLoss: number;
   profitFactor: string;
+  label?: string;
 };
 
 export type TradingSimulation = {
   positions: Position[];
   orders: SimOrder[];
   pnlHistory: number[];
+  shadowPnlHistory: number[];
   runPnlHistories: Record<string, number[]>;
   stats: {
+    realizedPnl: number;
+    unrealizedPnl: number;
+    totalPnl: number;
+    winRate: number;
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    maxDrawdown: number;
+    sharpe: string;
+    profitFactor: string;
+    avgWin: number;
+    avgLoss: number;
+    largestWin: number;
+    largestLoss: number;
+    openPositions: number;
+    avgTradeDuration: string;
+    consecutiveWins: number;
+    consecutiveLosses: number;
+  };
+  shadowStats: {
     realizedPnl: number;
     unrealizedPnl: number;
     totalPnl: number;
@@ -126,12 +148,41 @@ type OrderEvent = {
   order_id: string;
   state: string;
   symbol: string;
+  side: string | null;
   filled_qty: number | null;
   avg_fill_price: number | null;
   fill_price: number | null;
   remaining: number | null;
   error: string | null;
   timestamp: number | null;
+};
+
+type AccountSnapshot = {
+  name: string;
+  buying_power: number;
+  cash: number;
+  realized_pnl: number;
+};
+
+type CompletedTrade = {
+  pnl: number;
+};
+
+type BacktestResultEvent = {
+  instance_id: string;
+  algo_id: string;
+  source_id: string;
+  bars_count: number;
+  pnl?: number;
+  win_rate?: number;
+  sharpe?: string;
+  profit_factor?: string;
+  total_trades?: number;
+  avg_win?: number;
+  avg_loss?: number;
+  max_drawdown?: number;
+  skipped?: boolean;
+  reason?: string;
 };
 
 const formatTime = (ts: number | null) => {
@@ -152,24 +203,82 @@ const mapOrderStatus = (state: string): "Filled" | "Working" | "Cancelled" => {
   }
 };
 
+const mapSide = (side: string | null): "Buy" | "Sell" => {
+  if (side === "SELL" || side === "Sell") return "Sell";
+  return "Buy";
+};
+
 export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _dataSources: DataSource[]): TradingSimulation => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<SimOrder[]>([]);
   const [pnlHistory, setPnlHistory] = useState<number[]>([0]);
+  const [realizedPnl, setRealizedPnl] = useState(0);
+  const [shadowPnlHistory, setShadowPnlHistory] = useState<number[]>([0]);
+  const [shadowRealizedPnl, setShadowRealizedPnl] = useState(0);
+  const shadowRealizedPnlRef = useRef(0);
+  const [completedTrades, setCompletedTrades] = useState<CompletedTrade[]>([]);
+  const [shadowCompletedTrades, setShadowCompletedTrades] = useState<CompletedTrade[]>([]);
+  const [backtestStats, setBacktestStats] = useState<Record<string, AlgoStats & { label?: string }>>({});
   const nextOrderId = useRef(1);
+  // Track last known P&L per position key so we can record it on close
+  const positionPnlRef = useRef<Map<string, number>>(new Map());
+  // Track which positions are shadow (by posKey)
+  const shadowPositionKeys = useRef<Set<string>>(new Set());
+  // Ref to avoid stale closures in the sampling interval
+  const realizedPnlRef = useRef(0);
+
+  // Listen for account updates to get realized P&L from NinjaTrader
+  useEffect(() => {
+    const unlisten = listen<AccountSnapshot>("nt-account", (event) => {
+      const a = event.payload;
+      if (a.realized_pnl !== 0 || a.cash !== 0) {
+        const prev = realizedPnlRef.current;
+        setRealizedPnl(a.realized_pnl);
+        realizedPnlRef.current = a.realized_pnl;
+        // Append to P&L history only when realized P&L changes (trade closure)
+        if (a.realized_pnl !== prev) {
+          setPnlHistory((h) => [...h, a.realized_pnl]);
+        }
+      }
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
 
   // Listen for position updates from NinjaTrader
   useEffect(() => {
     const unlisten = listen<PositionEvent>("nt-position", (event) => {
+      console.log("[nt-position]", event.payload);
       const p = event.payload;
+      const posKey = `${p.source_id}:${p.symbol}`;
+
+      const isShadow = p.account === "shadow";
 
       if (p.direction === "Flat" || p.qty === 0) {
-        // Position closed — remove it
+        // Position closed — record the completed trade
+        const lastPnl = positionPnlRef.current.get(posKey) ?? 0;
+        if (lastPnl !== 0) {
+          if (isShadow) {
+            setShadowCompletedTrades((prev) => [...prev, { pnl: lastPnl }]);
+            const newTotal = Math.round((shadowRealizedPnlRef.current + lastPnl) * 100) / 100;
+            setShadowRealizedPnl(newTotal);
+            shadowRealizedPnlRef.current = newTotal;
+            setShadowPnlHistory((h) => [...h, newTotal]);
+          } else {
+            setCompletedTrades((prev) => [...prev, { pnl: lastPnl }]);
+          }
+        }
+        positionPnlRef.current.delete(posKey);
+        shadowPositionKeys.current.delete(posKey);
+
         setPositions((prev) => prev.filter(
           (pos) => !(pos.dataSourceId === p.source_id && pos.symbol === p.symbol)
         ));
         return;
       }
+
+      // Track current unrealized P&L for this position
+      positionPnlRef.current.set(posKey, p.unrealized_pnl);
+      if (isShadow) shadowPositionKeys.current.add(posKey);
 
       const side: "Long" | "Short" = p.direction === "Long" ? "Long" : "Short";
       const newPos: Position = {
@@ -204,6 +313,7 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
   // Listen for order updates from NinjaTrader
   useEffect(() => {
     const unlisten = listen<OrderEvent>("nt-order-update", (event) => {
+      console.log("[nt-order-update]", event.payload);
       const o = event.payload;
       const status = mapOrderStatus(o.state);
 
@@ -225,7 +335,7 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
           id: nextOrderId.current++,
           time: formatTime(o.timestamp),
           symbol: o.symbol,
-          side: "Buy", // Will be updated when we have direction info
+          side: mapSide(o.side),
           qty: o.filled_qty ?? o.remaining ?? 0,
           price: o.fill_price ?? o.avg_fill_price ?? 0,
           status,
@@ -250,62 +360,140 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
     return () => { unlisten.then((f) => f()); };
   }, []);
 
-  // Sample P&L history every 2 seconds
+  // Listen for backtest results from algo runners
   useEffect(() => {
-    const interval = setInterval(() => {
-      setPositions((currentPositions) => {
-        const unrealizedPnl = currentPositions.reduce((sum, p) => sum + p.pnl, 0);
-        if (currentPositions.length > 0 || pnlHistory.length > 1) {
-          setPnlHistory((prev) => [...prev.slice(-119), Math.round(unrealizedPnl * 100) / 100]);
-        }
-        return currentPositions;
-      });
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [pnlHistory.length]);
+    const unlisten = listen<BacktestResultEvent>("algo-backtest-result", (event) => {
+      console.log("[algo-backtest-result]", event.payload);
+      const r = event.payload;
+      if (r.skipped) {
+        // Tick-only algo — no backtest available
+        return;
+      }
+      const instanceId = r.instance_id;
+      const days = r.bars_count > 0 ? Math.max(1, Math.round(r.bars_count / 78)) : 0; // ~78 5min bars per day
+      const label = days > 0 ? `Backtest (${days}d)` : "Backtest";
+      setBacktestStats((prev) => ({
+        ...prev,
+        [instanceId]: {
+          pnl: r.pnl ?? 0,
+          winRate: r.win_rate ?? 0,
+          sharpe: r.sharpe ?? "--",
+          profitFactor: r.profit_factor ?? "--",
+          totalTrades: r.total_trades ?? 0,
+          avgWin: r.avg_win ?? 0,
+          avgLoss: r.avg_loss ?? 0,
+          maxDrawdown: r.max_drawdown ?? 0,
+          label,
+        },
+      }));
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
 
-  // Compute stats from real data
-  const unrealizedPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
-  const filledOrders = orders.filter((o) => o.status === "Filled");
-  const totalTrades = filledOrders.length;
-  const realizedPnl = pnlHistory[pnlHistory.length - 1] ?? 0;
-  const totalPnl = realizedPnl + unrealizedPnl;
-  const maxDrawdown = pnlHistory.length > 0 ? Math.min(...pnlHistory, 0) : 0;
 
-  const sharpe = pnlHistory.length > 2
-    ? (() => {
-        const returns = pnlHistory.slice(1).map((v, i) => v - pnlHistory[i]);
-        const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-        const std = Math.sqrt(returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length);
-        return std > 0 ? (mean / std).toFixed(2) : "--";
-      })()
-    : "--";
+  // Compute stats for a given set of trades and history
+  const computeStats = (
+    realized: number,
+    positionList: Position[],
+    trades: CompletedTrade[],
+    history: number[],
+  ) => {
+    const unrealized = positionList.reduce((sum, p) => sum + p.pnl, 0);
+    const total = realized + unrealized;
+
+    let peak = 0;
+    let dd = 0;
+    for (const v of history) {
+      if (v > peak) peak = v;
+      const currentDd = peak - v;
+      if (currentDd > dd) dd = currentDd;
+    }
+
+    const w = trades.filter((t) => t.pnl > 0);
+    const l = trades.filter((t) => t.pnl < 0);
+    const wc = w.length;
+    const lc = l.length;
+    const tc = wc + lc;
+    const winRate = tc > 0 ? Math.round((wc / tc) * 100) : 0;
+    const avgWin = wc > 0 ? w.reduce((s, t) => s + t.pnl, 0) / wc : 0;
+    const avgLoss = lc > 0 ? l.reduce((s, t) => s + t.pnl, 0) / lc : 0;
+    const largestWin = wc > 0 ? Math.max(...w.map((t) => t.pnl)) : 0;
+    const largestLoss = lc > 0 ? Math.min(...l.map((t) => t.pnl)) : 0;
+    const totalWin = w.reduce((s, t) => s + t.pnl, 0);
+    const totalLoss = Math.abs(l.reduce((s, t) => s + t.pnl, 0));
+    const profitFactor = totalLoss > 0 ? (totalWin / totalLoss).toFixed(2) : wc > 0 ? "∞" : "--";
+
+    let consecutiveWins = 0;
+    for (let i = trades.length - 1; i >= 0; i--) {
+      if (trades[i].pnl > 0) consecutiveWins++;
+      else break;
+    }
+    let consecutiveLosses = 0;
+    for (let i = trades.length - 1; i >= 0; i--) {
+      if (trades[i].pnl < 0) consecutiveLosses++;
+      else break;
+    }
+
+    const sharpe = history.length > 2
+      ? (() => {
+          const returns = history.slice(1).map((v, i) => v - history[i]);
+          const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+          const std = Math.sqrt(returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length);
+          return std > 0 ? (mean / std).toFixed(2) : "--";
+        })()
+      : "--";
+
+    return {
+      realizedPnl: realized,
+      unrealizedPnl: unrealized,
+      totalPnl: total,
+      winRate,
+      totalTrades: tc,
+      wins: wc,
+      losses: lc,
+      maxDrawdown: dd,
+      sharpe,
+      profitFactor,
+      avgWin,
+      avgLoss,
+      largestWin,
+      largestLoss,
+      openPositions: positionList.length,
+      avgTradeDuration: "--" as const,
+      consecutiveWins,
+      consecutiveLosses,
+    };
+  };
+
+  const livePositions = positions.filter((p) => p.account !== "shadow");
+  const shadowPositions = positions.filter((p) => p.account === "shadow");
+  const liveStats = computeStats(realizedPnl, livePositions, completedTrades, pnlHistory);
+  const shadowStatsComputed = computeStats(shadowRealizedPnl, shadowPositions, shadowCompletedTrades, shadowPnlHistory);
+
+  // Build per-instance algoStats: start with backtest, merge live data on top
+  const algoStats: Record<string, AlgoStats> = {};
+  for (const [instanceId, bt] of Object.entries(backtestStats)) {
+    algoStats[instanceId] = {
+      pnl: bt.pnl,
+      winRate: bt.winRate,
+      sharpe: bt.sharpe,
+      profitFactor: bt.profitFactor,
+      totalTrades: bt.totalTrades,
+      avgWin: bt.avgWin,
+      avgLoss: bt.avgLoss,
+      maxDrawdown: bt.maxDrawdown,
+      label: bt.label,
+    };
+  }
 
   return {
     positions,
     orders,
     pnlHistory,
+    shadowPnlHistory,
     runPnlHistories: {},
-    stats: {
-      realizedPnl,
-      unrealizedPnl,
-      totalPnl,
-      winRate: 0,
-      totalTrades,
-      wins: 0,
-      losses: 0,
-      maxDrawdown,
-      sharpe,
-      profitFactor: "--",
-      avgWin: 0,
-      avgLoss: 0,
-      largestWin: 0,
-      largestLoss: 0,
-      openPositions: positions.length,
-      avgTradeDuration: "--",
-      consecutiveWins: 0,
-      consecutiveLosses: 0,
-    },
-    algoStats: {},
+    stats: liveStats,
+    shadowStats: shadowStatsComputed,
+    algoStats,
   };
 };

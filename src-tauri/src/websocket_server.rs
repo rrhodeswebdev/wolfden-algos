@@ -10,7 +10,11 @@ use tauri::{AppHandle, Emitter};
 
 use serde::Serialize;
 
-use crate::types::{NtInbound, NtOutbound};
+use crate::types::{HistoryBar, NtInbound, NtOutbound};
+use crate::zmq_hub::OrderTracker;
+
+/// Stores historical bars per data source, keyed by source_id.
+pub type HistoryStore = Arc<RwLock<HashMap<String, Vec<HistoryBar>>>>;
 
 /// Account snapshot emitted to the frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +55,7 @@ pub struct OrderEvent {
     pub order_id: String,
     pub state: String,
     pub symbol: String,
+    pub side: Option<String>,
     pub filled_qty: Option<i64>,
     pub avg_fill_price: Option<f64>,
     pub fill_price: Option<f64>,
@@ -89,6 +94,11 @@ impl ConnectionRegistry {
         self.connections.get(source_id)
     }
 
+    /// Returns senders for all active connections.
+    pub fn all_senders(&self) -> Vec<&mpsc::Sender<NtOutbound>> {
+        self.connections.values().collect()
+    }
+
     /// Find a sender by matching symbol prefix (e.g. "ES 09-26" matches "ES 09-26:5min").
     /// Returns the first match if multiple connections share the same instrument.
     pub fn find_sender_by_symbol(&self, symbol: &str) -> Option<&mpsc::Sender<NtOutbound>> {
@@ -110,6 +120,8 @@ pub async fn start(
     port: u16,
     inbound_tx: broadcast::Sender<NtInbound>,
     registry: Arc<RwLock<ConnectionRegistry>>,
+    order_tracker: OrderTracker,
+    history_store: HistoryStore,
     app_handle: AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
@@ -122,6 +134,8 @@ pub async fn start(
 
         let inbound_tx = inbound_tx.clone();
         let registry = registry.clone();
+        let order_tracker = order_tracker.clone();
+        let history_store = history_store.clone();
         let app_handle = app_handle.clone();
 
         tokio::spawn(async move {
@@ -203,6 +217,13 @@ pub async fn start(
                                     *sid_lock = Some(sid);
                                 }
 
+                                // On History, store bars for this data source
+                                if let NtInbound::History { ref source_id, ref bars, .. } = parsed {
+                                    log::info!("Received {} historical bars for {}", bars.len(), source_id);
+                                    let mut store = history_store.write().await;
+                                    store.insert(source_id.clone(), bars.clone());
+                                }
+
                                 // On Account update, emit with the connection's account name
                                 if let NtInbound::Account { buying_power, cash, realized_pnl } = &parsed {
                                     let acct = account_name.read().await;
@@ -239,6 +260,12 @@ pub async fn start(
                                     let conn_sid = source_id.read().await;
                                     let symbol = conn_sid.as_ref().map(|s| s.split(':').next().unwrap_or("").to_string()).unwrap_or_default();
                                     drop(conn_sid);
+
+                                    // Look up order side from the tracker
+                                    let tracker = order_tracker.lock().await;
+                                    let side = tracker.get(order_id).map(|p| p.side.clone());
+                                    drop(tracker);
+
                                     if let Some(ref name) = *acct {
                                         let _ = app_handle.emit("nt-order-update", OrderEvent {
                                             source_id: msg_source_id.clone(),
@@ -247,6 +274,7 @@ pub async fn start(
                                             order_id: order_id.clone(),
                                             state: state.clone(),
                                             symbol,
+                                            side,
                                             filled_qty,
                                             avg_fill_price,
                                             fill_price,

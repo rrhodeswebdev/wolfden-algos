@@ -125,6 +125,81 @@ impl ProcessManager {
         Ok(pid)
     }
 
+    /// Stops all running algo processes and marks them as stopped in the DB.
+    pub fn stop_all(&self, db_state: &DbState) {
+        let mut procs = match self.processes.lock() {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("Failed to lock processes for stop_all: {}", e);
+                return;
+            }
+        };
+
+        let conn = match db_state.0.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Failed to lock DB for stop_all: {}", e);
+                // Still kill processes even if DB update fails
+                for (id, mut child) in procs.drain() {
+                    log::info!("Killing algo process: instance={} pid={}", id, child.id());
+                    child.kill().ok();
+                    child.wait().ok();
+                }
+                return;
+            }
+        };
+
+        for (id, mut child) in procs.drain() {
+            log::info!("Killing algo process: instance={} pid={}", id, child.id());
+            child.kill().ok();
+            child.wait().ok();
+            db::update_algo_instance_status(&conn, &id, "stopped", None).ok();
+        }
+    }
+
+    /// Stops all running algo processes for a given data source.
+    /// Called when a NinjaTrader chart disconnects.
+    pub fn stop_instances_for_source(
+        &self,
+        db_state: &DbState,
+        data_source_id: &str,
+    ) -> Vec<String> {
+        let conn = match db_state.0.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Failed to lock DB for stop_instances_for_source: {}", e);
+                return vec![];
+            }
+        };
+
+        // Find running instances for this data source
+        let instances = match db::get_algo_instances(&conn, Some(data_source_id)) {
+            Ok(list) => list,
+            Err(e) => {
+                log::error!("Failed to query instances for source {}: {}", data_source_id, e);
+                return vec![];
+            }
+        };
+
+        let mut stopped = vec![];
+        let mut procs = match self.processes.lock() {
+            Ok(p) => p,
+            Err(_) => return vec![],
+        };
+
+        for inst in instances.iter().filter(|i| i.status == "running") {
+            if let Some(mut child) = procs.remove(&inst.id) {
+                log::info!("Killing algo (chart disconnected): instance={} pid={}", inst.id, child.id());
+                child.kill().ok();
+                child.wait().ok();
+            }
+            db::update_algo_instance_status(&conn, &inst.id, "stopped", None).ok();
+            stopped.push(inst.id.clone());
+        }
+
+        stopped
+    }
+
     /// Stops a running algo process by instance_id.
     pub fn stop_instance(
         &self,

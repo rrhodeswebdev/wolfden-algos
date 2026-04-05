@@ -28,6 +28,9 @@ __pycache__/
 algo_envs/
 *.egg
 
+# Algo files on disk (DB is source of truth)
+algo_runtime/algos/
+
 # SQLite
 *.db
 *.db-journal

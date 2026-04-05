@@ -161,8 +161,25 @@ pub enum NtInbound {
         error: Option<String>,
         timestamp: Option<i64>,
     },
+    #[serde(rename = "history")]
+    History {
+        source_id: String,
+        symbol: String,
+        bars: Vec<HistoryBar>,
+    },
     #[serde(rename = "heartbeat")]
     Heartbeat,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryBar {
+    pub o: f64,
+    pub h: f64,
+    pub l: f64,
+    pub c: f64,
+    pub v: i64,
+    #[serde(rename = "t")]
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +216,8 @@ pub enum NtOutbound {
         stop_loss: BracketLeg,
         take_profit: BracketLeg,
     },
+    #[serde(rename = "flatten")]
+    Flatten,
     #[serde(rename = "heartbeat")]
     Heartbeat,
 }

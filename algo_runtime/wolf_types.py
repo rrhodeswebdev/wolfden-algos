@@ -67,6 +67,24 @@ Fill = NamedTuple("Fill", [
     ("timestamp", int),
 ])
 
+# --- Order Management ---
+
+ModifyOrder = NamedTuple("ModifyOrder", [
+    ("order_id", str),
+    ("qty", int),
+    ("limit_price", float),
+    ("stop_price", float),
+])
+
+CancelOrder = NamedTuple("CancelOrder", [
+    ("order_id", str),
+])
+
+OrderAccepted = NamedTuple("OrderAccepted", [
+    ("order_id", str),
+    ("timestamp", int),
+])
+
 
 # --- Algo Result ---
 
@@ -101,6 +119,14 @@ def stop_buy(qty: int, stop_price: float, symbol: str = "") -> Order:
 
 def stop_sell(qty: int, stop_price: float, symbol: str = "") -> Order:
     return Order("SELL", symbol, qty, "STOP", 0.0, stop_price)
+
+
+def modify_order(order_id: str, qty: int = 0, limit_price: float = 0.0, stop_price: float = 0.0) -> ModifyOrder:
+    return ModifyOrder(order_id, qty, limit_price, stop_price)
+
+
+def cancel_order(order_id: str) -> CancelOrder:
+    return CancelOrder(order_id)
 
 
 def bracket(

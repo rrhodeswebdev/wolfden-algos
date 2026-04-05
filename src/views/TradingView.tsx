@@ -92,11 +92,14 @@ const useAnimatedNumber = (target: number, speed = 0.08) => {
   return display;
 };
 
+type TradingMode = "live" | "shadow";
+
 export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps) => {
-  const { positions, orders, pnlHistory, runPnlHistories, stats } = simulation;
+  const { positions, orders, pnlHistory, shadowPnlHistory, runPnlHistories, stats, shadowStats } = simulation;
   const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
+  const [tradingMode, setTradingMode] = useState<TradingMode>("live");
 
   // Clear algo selection if the selected algo stops running
   useEffect(() => {
@@ -120,9 +123,11 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
     return `${instrument.split(" ")[0]} ${tf}`;
   };
 
-  // Filter data based on all selections
+  // Filter data based on mode and all selections
   const applyFilters = <T extends { algoId: number; account: string; dataSourceId: string }>(items: T[]): T[] => {
-    let result = items;
+    let result = tradingMode === "shadow"
+      ? items.filter((i) => i.account === "shadow")
+      : items.filter((i) => i.account !== "shadow");
     if (selectedAlgoId !== null) result = result.filter((i) => i.algoId === selectedAlgoId);
     if (selectedAccount !== null) result = result.filter((i) => i.account === selectedAccount);
     if (selectedChart !== null) result = result.filter((i) => i.dataSourceId === selectedChart);
@@ -132,9 +137,13 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
   const filteredPositions = applyFilters(positions);
   const filteredOrders = applyFilters(orders);
 
+  // Select data based on trading mode
+  const modeStats = tradingMode === "shadow" ? shadowStats : stats;
+  const modePnlHistory = tradingMode === "shadow" ? shadowPnlHistory : pnlHistory;
+
   // P&L history: sum relevant run histories based on filters
   const filteredPnlHistory = (() => {
-    if (selectedAlgoId === null && selectedAccount === null && selectedChart === null) return pnlHistory;
+    if (selectedAlgoId === null && selectedAccount === null && selectedChart === null) return modePnlHistory;
 
     // Find matching run keys (instance_ids)
     const matchingKeys = Object.keys(runPnlHistories).filter((instanceId) => {
@@ -162,30 +171,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
     return summed;
   })();
 
-  // Compute filtered stats
-  const hasFilters = selectedAlgoId !== null || selectedAccount !== null || selectedChart !== null;
-  const filteredStats = hasFilters
-    ? (() => {
-        const fp = filteredPositions;
-        const fo = filteredOrders.filter((o) => o.status === "Filled");
-        const ph = filteredPnlHistory;
-        const realizedPnl = ph[ph.length - 1] ?? 0;
-        const unrealizedPnl = fp.reduce((sum, p) => sum + p.targetPnl, 0);
-        const totalTrades = fo.length;
-        const wins = Math.ceil(totalTrades * 0.58);
-        const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 100) : 0;
-        const maxDrawdown = ph.length > 0 ? Math.min(...ph, 0) : 0;
-        const sharpe = ph.length > 2
-          ? (() => {
-              const returns = ph.slice(1).map((v, i) => v - ph[i]);
-              const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-              const std = Math.sqrt(returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length);
-              return std > 0 ? (mean / std).toFixed(2) : "--";
-            })()
-          : "--";
-        return { realizedPnl, unrealizedPnl, totalPnl: realizedPnl + unrealizedPnl, winRate, totalTrades, maxDrawdown, sharpe };
-      })()
-    : stats;
+  const filteredStats = modeStats;
 
   const smoothedPositions = useSmoothedPositions(filteredPositions);
 
@@ -193,13 +179,38 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
   const animatedUnrealized = useAnimatedNumber(filteredStats.unrealizedPnl);
   const animatedTotal = useAnimatedNumber(filteredStats.totalPnl);
 
-  const hasActivity = positions.length > 0 || orders.length > 0;
+  const hasActivity = filteredPositions.length > 0 || filteredOrders.length > 0;
 
   return (
     <div className="flex-1 flex flex-col gap-3 p-4 overflow-hidden">
-      {/* View-Level Filters */}
+      {/* Mode Toggle + View-Level Filters */}
       {(runningAlgos.length > 0 || activeAccounts.length > 0) && (
         <div className="flex items-center gap-4 px-2 flex-wrap">
+          {/* Mode Toggle */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mr-1">Mode</span>
+            {(["live", "shadow"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setTradingMode(mode)}
+                className={`px-3 py-1.5 text-[11px] rounded-md transition-colors flex items-center gap-1.5 ${
+                  tradingMode === mode
+                    ? mode === "live"
+                      ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+                      : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  mode === "live" ? "bg-[var(--accent-green)]" : "bg-[var(--accent-yellow)]"
+                }`} />
+                {mode === "live" ? "Live" : "Shadow"}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-px h-5 bg-[var(--border)]" />
+
           {/* Chart Filters */}
           {activeCharts.length > 0 && (
             <div className="flex items-center gap-1.5">
@@ -326,14 +337,14 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
       <div className="flex-1 bg-[var(--bg-panel)] rounded-lg p-4 flex flex-col min-h-0">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-            Session P&L
+            {tradingMode === "shadow" ? "Shadow P&L" : "Session P&L"}
           </h2>
         </div>
         {filteredPnlHistory.length > 1 ? (
           <PnlChart data={filteredPnlHistory} />
         ) : (
           <div className="flex-1 flex items-center justify-center text-sm text-[var(--text-secondary)] border border-dashed border-[var(--border)] rounded-lg">
-            Start an algo to see live P&L
+            {tradingMode === "shadow" ? "No shadow trades yet" : "Start an algo to see live P&L"}
           </div>
         )}
       </div>
@@ -557,15 +568,16 @@ const PnlChart = ({ data }: { data: number[] }) => {
 
     ctx.clearRect(0, 0, w, h);
 
-    const min = Math.min(...animData);
-    const max = Math.max(...animData);
-    const range = max - min || 1;
+    // Anchor Y-axis at $0
+    const dataMin = Math.min(...animData, 0);
+    const dataMax = Math.max(...animData, 0);
+    const range = dataMax - dataMin || 1;
     const padding = range * 0.1;
 
     const minPoints = 60;
     const xScale = Math.max(animData.length - 1, minPoints);
     const toX = (i: number) => (i / xScale) * w;
-    const toY = (v: number) => h - ((v - min + padding) / (range + padding * 2)) * h;
+    const toY = (v: number) => h - ((v - dataMin + padding) / (range + padding * 2)) * h;
 
     // Zero line
     const zeroY = toY(0);
@@ -580,27 +592,14 @@ const PnlChart = ({ data }: { data: number[] }) => {
 
     const lastVal = animData[animData.length - 1];
 
-    const tension = 0.3;
-    const getControlPoints = (i: number) => {
-      const p0 = i > 0 ? animData[i - 1] : animData[0];
-      const p1 = animData[i];
-      const p2 = i < animData.length - 1 ? animData[i + 1] : animData[animData.length - 1];
-      const p3 = i < animData.length - 2 ? animData[i + 2] : p2;
-
-      const cp1x = toX(i) + (toX(i + 1) - toX(Math.max(0, i - 1))) / 6 * tension * 3;
-      const cp1y = toY(p1) + (toY(p2) - toY(p0)) / 6 * tension * 3;
-      const cp2x = toX(i + 1) - (toX(Math.min(animData.length - 1, i + 2)) - toX(i)) / 6 * tension * 3;
-      const cp2y = toY(p2) - (toY(p3) - toY(p1)) / 6 * tension * 3;
-
-      return { cp1x, cp1y, cp2x, cp2y };
-    };
-
-    // Build the curve path as a reusable function
-    const traceCurve = () => {
+    // Build the step-line path (horizontal then vertical at each point)
+    const traceStepLine = () => {
       ctx.moveTo(toX(0), toY(animData[0]));
-      for (let i = 0; i < animData.length - 1; i++) {
-        const { cp1x, cp1y, cp2x, cp2y } = getControlPoints(i);
-        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, toX(i + 1), toY(animData[i + 1]));
+      for (let i = 1; i < animData.length; i++) {
+        // Horizontal segment to the next x position at the previous y
+        ctx.lineTo(toX(i), toY(animData[i - 1]));
+        // Vertical segment to the new y
+        ctx.lineTo(toX(i), toY(animData[i]));
       }
     };
 
@@ -633,7 +632,7 @@ const PnlChart = ({ data }: { data: number[] }) => {
 
       ctx.beginPath();
       ctx.moveTo(toX(0), zeroY);
-      traceCurve();
+      traceStepLine();
       ctx.lineTo(toX(animData.length - 1), zeroY);
       ctx.closePath();
       ctx.fillStyle = grad;
@@ -641,7 +640,7 @@ const PnlChart = ({ data }: { data: number[] }) => {
 
       // Line
       ctx.beginPath();
-      traceCurve();
+      traceStepLine();
       ctx.strokeStyle = region.color;
       ctx.lineWidth = 2;
       ctx.stroke();

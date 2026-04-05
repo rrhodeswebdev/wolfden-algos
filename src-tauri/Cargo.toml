@@ -47,3 +47,9 @@ uuid = { version = "1", features = ["v4"] }
 
 # Byte buffers (used by ZMQ messages)
 bytes = "1"
+
+# PTY for AI terminal (Claude Code)
+portable-pty = "0.8"
+
+# File watching for AI terminal → DB sync
+notify = "7"

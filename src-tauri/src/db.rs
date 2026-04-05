@@ -118,6 +118,12 @@ pub fn initialize(path: &Path) -> Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_algo_runs_session ON algo_runs(session_id);",
     )?;
 
+    // Mark any leftover "running" instances as "stopped" — no process survives an app restart
+    conn.execute(
+        "UPDATE algo_instances SET status = 'stopped', pid = NULL, stopped_at = datetime('now') WHERE status = 'running'",
+        [],
+    )?;
+
     seed_sample_algos(&conn)?;
 
     Ok(conn)
@@ -128,6 +134,7 @@ fn seed_sample_algos(conn: &Connection) -> Result<()> {
         ("Demo: EMA Crossover", include_str!("../../algo_runtime/examples/ema_cross.py")),
         ("Demo: CVD Divergence", include_str!("../../algo_runtime/examples/cvd_divergence.py")),
         ("Demo: Scalper", include_str!("../../algo_runtime/examples/scalper.py")),
+        ("Demo: Prev Candle Breakout", include_str!("../../algo_runtime/examples/prev_candle_breakout.py")),
     ];
 
     for (name, code) in samples {
@@ -140,6 +147,12 @@ fn seed_sample_algos(conn: &Connection) -> Result<()> {
             conn.execute(
                 "INSERT INTO algos (name, code, dependencies) VALUES (?1, ?2, '')",
                 params![name, code],
+            )?;
+        } else {
+            // Update demo algos to latest code on each launch
+            conn.execute(
+                "UPDATE algos SET code = ?1, updated_at = datetime('now') WHERE name = ?2",
+                params![code, name],
             )?;
         }
     }
@@ -243,6 +256,14 @@ pub fn update_algo(conn: &Connection, id: i64, name: &str, code: &str, dependenc
     Ok(())
 }
 
+pub fn update_algo_code(conn: &Connection, id: i64, code: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE algos SET code = ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![code, id],
+    )?;
+    Ok(())
+}
+
 pub fn delete_algo(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM algos WHERE id = ?1", params![id])?;
     Ok(())
@@ -300,6 +321,44 @@ pub fn get_trades(conn: &Connection, session_id: Option<i64>, algo_id: Option<i6
         })
     })?;
     rows.collect()
+}
+
+pub fn insert_trade(
+    conn: &Connection,
+    session_id: i64,
+    algo_id: i64,
+    instance_id: &str,
+    symbol: &str,
+    side: &str,
+    qty: i64,
+    price: f64,
+    filled_at: &str,
+    order_type: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO trades (session_id, algo_id, instance_id, symbol, side, qty, price, filled_at, order_type)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![session_id, algo_id, instance_id, symbol, side, qty, price, filled_at, order_type],
+    )?;
+    Ok(())
+}
+
+pub fn get_or_create_active_session(conn: &Connection) -> Result<i64> {
+    let result: Result<i64> = conn.query_row(
+        "SELECT id FROM sessions WHERE status = 'active' ORDER BY started_at DESC LIMIT 1",
+        [],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(id) => Ok(id),
+        Err(_) => {
+            conn.execute(
+                "INSERT INTO sessions (status) VALUES ('active')",
+                [],
+            )?;
+            Ok(conn.last_insert_rowid())
+        }
+    }
 }
 
 // --- Algo Runs ---
@@ -429,6 +488,12 @@ pub fn create_algo_instance(
     max_daily_trades: i64,
     stop_loss_ticks: Option<i64>,
 ) -> Result<AlgoInstance> {
+    // Remove any stopped instance for this (algo, source, account) combo
+    // so the unique index doesn't block re-creating it.
+    conn.execute(
+        "DELETE FROM algo_instances WHERE algo_id = ?1 AND data_source_id = ?2 AND account = ?3 AND status = 'stopped'",
+        params![algo_id, data_source_id, account],
+    )?;
     conn.execute(
         "INSERT INTO algo_instances (id, algo_id, data_source_id, account, mode, max_position_size, max_daily_loss, max_daily_trades, stop_loss_ticks)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",

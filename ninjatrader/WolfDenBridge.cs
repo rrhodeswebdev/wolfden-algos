@@ -38,8 +38,12 @@ namespace NinjaTrader.NinjaScript.Strategies
         private double                                      _cachedCash;
         private double                                      _cachedRealizedPnl;
         private DateTime                                    _lastAccountSend = DateTime.MinValue;
+        private DateTime                                    _lastPositionSend = DateTime.MinValue;
 
         private bool                                        _isRealtime;
+
+        // Pre-built history JSON (built on NinjaScript thread, sent from background task)
+        private volatile string                             _historyJson;
 
         // Pending bracket orders: entry Wolf Den ID -> BracketCommand
         private ConcurrentDictionary<string, BracketCmd>    _pendingBrackets;
@@ -82,6 +86,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 
                 case State.Realtime:
                     _isRealtime = true;
+                    BuildHistoryJson();
                     ConnectAsync();
                     break;
 
@@ -105,6 +110,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     Print("WolfDenBridge: Connected to " + uri);
 
                     SendRegister();
+                    SendHistory();
 
                     _heartbeatTimer = new Timer(_ => SendHeartbeat(), null,
                         TimeSpan.FromSeconds(HeartbeatSeconds),
@@ -144,6 +150,7 @@ namespace NinjaTrader.NinjaScript.Strategies
                     Print("WolfDenBridge: Reconnected to " + uri);
 
                     SendRegister();
+                    SendHistory();
 
                     _heartbeatTimer = new Timer(_ => SendHeartbeat(), null,
                         TimeSpan.FromSeconds(HeartbeatSeconds),
@@ -270,18 +277,43 @@ namespace NinjaTrader.NinjaScript.Strategies
                     return;
             }
 
-            if (!SendTicks || _ws == null || !_ws.IsConnected) return;
+            if (_ws == null || !_ws.IsConnected) return;
 
-            _ws.Send(Json.Build(
-                "type",       "tick",
-                "source_id",  _sourceId,
-                "symbol",     _symbol,
-                "price",      e.Price,
-                "size",       (long)e.Volume,
-                "bid",        _lastBid,
-                "ask",        _lastAsk,
-                "timestamp",  ToUnixMs(e.Time)
-            ));
+            if (SendTicks)
+            {
+                _ws.Send(Json.Build(
+                    "type",       "tick",
+                    "source_id",  _sourceId,
+                    "symbol",     _symbol,
+                    "price",      e.Price,
+                    "size",       (long)e.Volume,
+                    "bid",        _lastBid,
+                    "ask",        _lastAsk,
+                    "timestamp",  ToUnixMs(e.Time)
+                ));
+            }
+
+            // Send live position snapshot every 500ms so frontend P&L stays current
+            if (Position.MarketPosition != MarketPosition.Flat
+                && (e.Time - _lastPositionSend).TotalMilliseconds >= 500)
+            {
+                _lastPositionSend = e.Time;
+
+                string direction = Position.MarketPosition == MarketPosition.Long ? "Long" : "Short";
+                double unrealizedPnl = 0;
+                try { unrealizedPnl = Position.GetUnrealizedProfitLoss(PerformanceUnit.Currency); }
+                catch { }
+
+                _ws.Send(Json.Build(
+                    "type",           "position",
+                    "source_id",      _sourceId,
+                    "symbol",         _symbol,
+                    "direction",      direction,
+                    "qty",            (long)Position.Quantity,
+                    "avg_price",      Position.AveragePrice,
+                    "unrealized_pnl", unrealizedPnl
+                ));
+            }
         }
 
         protected override void OnOrderUpdate(Order order, double limitPrice, double stopPrice,
@@ -565,6 +597,59 @@ namespace NinjaTrader.NinjaScript.Strategies
                 "chart_id",   _chartId,
                 "account",    Account.Name
             ));
+        }
+
+        /// Builds the history JSON on the NinjaScript thread where data series access is safe.
+        /// Must be called from State.Realtime (or another NinjaScript event) before ConnectAsync.
+        private void BuildHistoryJson()
+        {
+            int count = CurrentBar;
+            if (count < 1)
+            {
+                _historyJson = null;
+                return;
+            }
+
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var sb = new StringBuilder(count * 80 + 64);
+            sb.Append("{\"type\":\"history\",\"source_id\":\"").Append(EscapeJsonValue(_sourceId));
+            sb.Append("\",\"symbol\":\"").Append(EscapeJsonValue(_symbol));
+            sb.Append("\",\"bars\":[");
+
+            bool first = true;
+            for (int i = count - 1; i >= 1; i--)
+            {
+                int barsAgo = i;
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append("{\"o\":").Append(Opens[0][barsAgo].ToString("R", inv));
+                sb.Append(",\"h\":").Append(Highs[0][barsAgo].ToString("R", inv));
+                sb.Append(",\"l\":").Append(Lows[0][barsAgo].ToString("R", inv));
+                sb.Append(",\"c\":").Append(Closes[0][barsAgo].ToString("R", inv));
+                sb.Append(",\"v\":").Append(((long)Volumes[0][barsAgo]).ToString(inv));
+                sb.Append(",\"t\":").Append(ToUnixMs(Times[0][barsAgo]).ToString(inv));
+                sb.Append('}');
+            }
+
+            sb.Append("]}");
+            _historyJson = sb.ToString();
+            Print("WolfDenBridge: Built history JSON with " + (count - 1) + " bars");
+        }
+
+        /// Sends the pre-built history JSON. Safe to call from any thread.
+        private void SendHistory()
+        {
+            if (_ws == null || !_ws.IsConnected) return;
+            string json = _historyJson;
+            if (json == null) return;
+            _ws.Send(json);
+            Print("WolfDenBridge: Sent history");
+        }
+
+        private static string EscapeJsonValue(string s)
+        {
+            if (s.IndexOfAny(new[] { '"', '\\' }) < 0) return s;
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private void SendHeartbeat()
