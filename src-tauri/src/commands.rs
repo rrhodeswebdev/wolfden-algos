@@ -1,6 +1,6 @@
 use crate::db::{self, DbState};
-use crate::ProcState;
 use crate::types::{Algo, AlgoInstance, AlgoRun, DataSource, RiskConfig, Session, Trade};
+use crate::{AiTermState, ProcState};
 
 #[tauri::command]
 pub fn get_algos(state: tauri::State<DbState>) -> Result<Vec<Algo>, String> {
@@ -119,6 +119,7 @@ pub fn start_algo_instance(
     proc_state: tauri::State<ProcState>,
     instance_id: String,
 ) -> Result<(), String> {
+    log::info!("start_algo_instance: received request for instance_id={}", instance_id);
     proc_state.0.start_instance(&db_state, &instance_id)?;
     log::info!("start_algo_instance: spawned instance_id={}", instance_id);
     Ok(())
@@ -160,4 +161,52 @@ pub fn delete_algo_instance(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     db::delete_algo_instance(&conn, &instance_id).map_err(|e| e.to_string())
+}
+
+// --- AI Terminal ---
+
+#[tauri::command]
+pub fn spawn_ai_terminal(
+    db_state: tauri::State<DbState>,
+    ai_state: tauri::State<AiTermState>,
+    app_handle: tauri::AppHandle,
+    algo_id: i64,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    ai_state.0.spawn(&db_state, algo_id, rows, cols, app_handle)
+}
+
+#[tauri::command]
+pub fn write_ai_terminal(
+    ai_state: tauri::State<AiTermState>,
+    algo_id: i64,
+    input: String,
+) -> Result<(), String> {
+    ai_state.0.write(algo_id, input.as_bytes())
+}
+
+#[tauri::command]
+pub fn resize_ai_terminal(
+    ai_state: tauri::State<AiTermState>,
+    algo_id: i64,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    ai_state.0.resize(algo_id, rows, cols)
+}
+
+#[tauri::command]
+pub fn close_ai_terminal(
+    ai_state: tauri::State<AiTermState>,
+    algo_id: i64,
+) -> Result<(), String> {
+    ai_state.0.close(algo_id)
+}
+
+#[tauri::command]
+pub fn get_active_ai_terminals(
+    ai_state: tauri::State<AiTermState>,
+) -> Result<Vec<i64>, String> {
+    Ok(ai_state.0.active_algo_ids())
 }

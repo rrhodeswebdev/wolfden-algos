@@ -18,6 +18,9 @@ type EditorViewProps = {
   editorCode: string;
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
+  onCreateAlgoWithAi?: () => void;
+  onOpenAiTerminal?: (algoId: number) => void;
+  aiTerminalAlgoIds?: Set<number>;
   onDeleteAlgo: (id: number) => void;
   onRenameAlgo: (id: number, newName: string) => void;
   onEditorChange: (code: string) => void;
@@ -30,6 +33,9 @@ export const EditorView = ({
   editorCode,
   onSelectAlgo,
   onCreateAlgo,
+  onCreateAlgoWithAi,
+  onOpenAiTerminal,
+  aiTerminalAlgoIds,
   onDeleteAlgo,
   onRenameAlgo,
   onEditorChange,
@@ -44,6 +50,9 @@ export const EditorView = ({
           selectedAlgoId={selectedAlgoId}
           onSelectAlgo={onSelectAlgo}
           onCreateAlgo={onCreateAlgo}
+          onCreateAlgoWithAi={onCreateAlgoWithAi}
+          onOpenAiTerminal={onOpenAiTerminal}
+          aiTerminalAlgoIds={aiTerminalAlgoIds}
           onDeleteAlgo={onDeleteAlgo}
           onRenameAlgo={onRenameAlgo}
         />

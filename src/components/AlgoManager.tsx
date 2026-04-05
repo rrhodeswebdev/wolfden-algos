@@ -14,20 +14,24 @@ type Algo = {
 
 type AlgoManagerProps = {
   algos: Algo[];
-
   selectedAlgoId: number | null;
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
+  onCreateAlgoWithAi?: () => void;
+  onOpenAiTerminal?: (algoId: number) => void;
+  aiTerminalAlgoIds?: Set<number>;
   onDeleteAlgo: (id: number) => void;
   onRenameAlgo: (id: number, newName: string) => void;
 };
 
 export const AlgoManager = ({
   algos,
-
   selectedAlgoId,
   onSelectAlgo,
   onCreateAlgo,
+  onCreateAlgoWithAi,
+  onOpenAiTerminal,
+  aiTerminalAlgoIds,
   onDeleteAlgo,
   onRenameAlgo,
 }: AlgoManagerProps) => {
@@ -66,12 +70,22 @@ export const AlgoManager = ({
         <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
           Algo Manager
         </span>
-        <button
-          onClick={onCreateAlgo}
-          className="px-4 py-1.5 text-xs bg-[var(--accent-green)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
-        >
-          + New
-        </button>
+        <div className="flex items-center gap-2">
+          {onCreateAlgoWithAi && (
+            <button
+              onClick={onCreateAlgoWithAi}
+              className="px-3 py-1.5 text-xs bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] rounded-md hover:bg-[var(--accent-blue)]/25 transition-colors font-medium"
+            >
+              + AI
+            </button>
+          )}
+          <button
+            onClick={onCreateAlgo}
+            className="px-4 py-1.5 text-xs bg-[var(--accent-green)] text-black rounded-md hover:opacity-90 transition-opacity font-medium"
+          >
+            + New
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-auto">
         {algos.length === 0 ? (
@@ -84,6 +98,8 @@ export const AlgoManager = ({
               const isSelected = algo.id === selectedAlgoId;
               const isEditing = editingId === algo.id;
 
+              const hasActiveTerminal = aiTerminalAlgoIds?.has(algo.id) ?? false;
+
               return (
                 <div
                   key={algo.id}
@@ -94,7 +110,7 @@ export const AlgoManager = ({
                       : "hover:bg-[var(--bg-secondary)]"
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     {isEditing ? (
                       <input
                         ref={inputRef}
@@ -113,12 +129,33 @@ export const AlgoManager = ({
                         {algo.name}
                       </span>
                     )}
+                    {hasActiveTerminal && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse flex-shrink-0" title="AI terminal active" />
+                    )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover/algo:opacity-100 transition-opacity">
+                    {!isEditing && onOpenAiTerminal && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectAlgo(algo.id);
+                          onOpenAiTerminal(algo.id);
+                        }}
+                        disabled={hasActiveTerminal}
+                        className={`px-2 py-1 text-[11px] transition-colors ${
+                          hasActiveTerminal
+                            ? "text-[var(--accent-blue)]/50 cursor-not-allowed"
+                            : "text-[var(--text-secondary)] hover:text-[var(--accent-blue)]"
+                        }`}
+                      >
+                        AI
+                      </button>
+                    )}
                     {!isEditing && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          onSelectAlgo(algo.id);
                           startRename(algo);
                         }}
                         className="px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-colors"
@@ -132,6 +169,7 @@ export const AlgoManager = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        onSelectAlgo(algo.id);
                         onDeleteAlgo(algo.id);
                       }}
                       className="px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-red)] transition-colors"

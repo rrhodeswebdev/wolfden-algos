@@ -9,6 +9,8 @@ import { AlgosView } from "./views/AlgosView";
 import { TradingView } from "./views/TradingView";
 import { TitleBar } from "./components/TitleBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { AiTerminalPanel } from "./components/AiTerminalPanel";
+import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import type { DataSource } from "./hooks/useTradingSimulation";
 
@@ -44,8 +46,11 @@ export const App = () => {
   const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
+  const [aiTerminalAlgoIds, setAiTerminalAlgoIds] = useState<Set<number>>(new Set());
+
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
   const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
+  const aiTerminalAlgos = algos.filter((a) => aiTerminalAlgoIds.has(a.id));
 
   const loadAlgos = useCallback(async () => {
     try {
@@ -56,9 +61,31 @@ export const App = () => {
     }
   }, []);
 
+  // Load algos and running instances on startup
+  const loadRunningInstances = useCallback(async () => {
+    try {
+      type Instance = { id: string; algo_id: number; data_source_id: string; account: string; mode: string; status: string };
+      const instances = await invoke<Instance[]>("get_algo_instances", { dataSourceId: null });
+      const running = instances
+        .filter((i) => i.status === "running")
+        .map((i) => ({
+          algo_id: i.algo_id,
+          status: i.status,
+          mode: i.mode,
+          account: i.account,
+          data_source_id: i.data_source_id,
+          instance_id: i.id,
+        }));
+      setActiveRuns(running);
+    } catch (e) {
+      console.error("Failed to load running instances:", e);
+    }
+  }, []);
+
   useEffect(() => {
     loadAlgos();
-  }, [loadAlgos]);
+    loadRunningInstances();
+  }, [loadAlgos, loadRunningInstances]);
 
   useEffect(() => {
     const u1 = listen<number>("nt-connection-count", (event) => {
@@ -83,7 +110,32 @@ export const App = () => {
       });
     });
     const u5 = listen<string>("nt-chart-removed", (event) => {
-      setDataSources((prev) => prev.filter((ds) => ds.id !== event.payload));
+      const removedId = event.payload;
+      setDataSources((prev) => prev.filter((ds) => ds.id !== removedId));
+
+      // Stop any algos running on the disconnected chart
+      setActiveRuns((prev) => {
+        const toStop = prev.filter((r) => r.data_source_id === removedId);
+        for (const run of toStop) {
+          invoke("stop_algo_instance", { instanceId: run.instance_id }).catch((e) =>
+            console.error("Failed to stop algo on chart disconnect:", e)
+          );
+        }
+        return prev.filter((r) => r.data_source_id !== removedId);
+      });
+    });
+    const u6 = listen<{ algo_id: number; code: string }>("algo-code-updated", (event) => {
+      const { algo_id, code } = event.payload;
+      setAlgos((prev) =>
+        prev.map((a) => (a.id === algo_id ? { ...a, code, updated_at: new Date().toISOString() } : a))
+      );
+      // If the updated algo is currently selected in the editor, update editorCode
+      setSelectedAlgoId((currentId) => {
+        if (currentId === algo_id) {
+          setEditorCode(code);
+        }
+        return currentId;
+      });
     });
     return () => {
       u1.then((f) => f());
@@ -91,6 +143,7 @@ export const App = () => {
       u3.then((f) => f());
       u4.then((f) => f());
       u5.then((f) => f());
+      u6.then((f) => f());
     };
   }, []);
 
@@ -203,26 +256,70 @@ export const App = () => {
     });
   };
 
-  const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => {
+  const handleCreateAlgoWithAi = useCallback(async () => {
     try {
-      const instanceId = crypto.randomUUID();
-      await invoke("start_algo_instance", { instanceId });
+      const name = `algo_${Date.now()}`;
+      const algo = await invoke<Algo>("create_algo", {
+        name,
+        code: DEFAULT_ALGO,
+        dependencies: "",
+      });
+      setAlgos((prev) => [algo, ...prev]);
+      setAiTerminalAlgoIds((prev) => new Set(prev).add(algo.id));
+    } catch (e) {
+      console.error("Failed to create algo:", e);
+      toast.error("Failed to create algo: " + e);
+    }
+  }, []);
+
+  const handleOpenAiTerminal = useCallback((algoId: number) => {
+    if (aiTerminalAlgoIds.has(algoId)) {
+      // Terminal already running — just show the panel
+      return;
+    }
+    setAiTerminalAlgoIds((prev) => new Set(prev).add(algoId));
+  }, [aiTerminalAlgoIds]);
+
+  const handleCloseAiTerminal = useCallback((algoId: number) => {
+    setAiTerminalAlgoIds((prev) => {
+      const next = new Set(prev);
+      next.delete(algoId);
+      return next;
+    });
+  }, []);
+
+  const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => {
+    console.log("[handleStartAlgo] called:", { id, mode, account, dataSourceId });
+    try {
+      // Create the instance in the DB first
+      const instance = await invoke<{ id: string }>("create_algo_instance", {
+        algoId: id,
+        dataSourceId: dataSourceId,
+        account,
+        mode,
+      });
+      console.log("[handleStartAlgo] instance created:", instance.id);
+      // Then spawn the Python process
+      await invoke("start_algo_instance", { instanceId: instance.id });
+      console.log("[handleStartAlgo] process started, adding to activeRuns");
       setActiveRuns((prev) => [...prev, {
         algo_id: id, status: "running", mode, account,
-        data_source_id: dataSourceId, instance_id: instanceId,
+        data_source_id: dataSourceId, instance_id: instance.id,
       }]);
     } catch (e) {
       console.error("Failed to start algo:", e);
+      alert("Failed to start algo: " + e);
     }
   };
 
   const handleStopAlgo = async (instanceId: string) => {
     try {
       await invoke("stop_algo_instance", { instanceId });
-      setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
     } catch (e) {
       console.error("Failed to stop algo:", e);
     }
+    // Always remove from UI even if backend call fails
+    setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
   };
 
   return (
@@ -255,6 +352,9 @@ export const App = () => {
           editorCode={editorCode}
           onSelectAlgo={handleSelectAlgo}
           onCreateAlgo={handleCreateAlgo}
+          onCreateAlgoWithAi={handleCreateAlgoWithAi}
+          onOpenAiTerminal={handleOpenAiTerminal}
+          aiTerminalAlgoIds={aiTerminalAlgoIds}
           onDeleteAlgo={handleDeleteAlgo}
           onRenameAlgo={handleRenameAlgo}
           onEditorChange={setEditorCode}
@@ -270,11 +370,30 @@ export const App = () => {
           algoStats={simulation.algoStats}
           onStartAlgo={handleStartAlgo}
           onStopAlgo={handleStopAlgo}
+          onOpenAiTerminal={handleOpenAiTerminal}
+          aiTerminalAlgoIds={aiTerminalAlgoIds}
         />
       )}
 
       {activeView === "trading" && (
         <TradingView simulation={simulation} algos={algos} activeRuns={activeRuns} />
+      )}
+
+      {aiTerminalAlgos.length > 0 && (
+        <AiTerminalPanel
+          tabs={aiTerminalAlgos.map((a) => ({ algoId: a.id, algoName: a.name }))}
+          selectedAlgoId={selectedAlgoId}
+          onSelectAlgo={setSelectedAlgoId}
+          onClose={handleCloseAiTerminal}
+          onSpawnError={(algoId, error) => {
+            handleCloseAiTerminal(algoId);
+            if (error.includes("not found")) {
+              toast.error("Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code");
+            } else {
+              toast.error("Failed to start AI terminal: " + error);
+            }
+          }}
+        />
       )}
       </div>
 
@@ -286,6 +405,8 @@ export const App = () => {
           onCancel={() => setConfirmDialog(null)}
         />
       )}
+
+      <ToastContainer />
     </div>
   );
 };

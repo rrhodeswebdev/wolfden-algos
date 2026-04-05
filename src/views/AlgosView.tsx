@@ -28,6 +28,8 @@ type AlgosViewProps = {
   algoStats: Record<string, AlgoStats>;
   onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
   onStopAlgo: (instanceId: string) => void;
+  onOpenAiTerminal?: (algoId: number) => void;
+  aiTerminalAlgoIds?: Set<number>;
 };
 
 const formatDataSource = (ds: DataSource) => {
@@ -46,7 +48,15 @@ const PerformanceStats = ({ stats }: { stats: AlgoStats }) => {
   const pnlColor = stats.pnl >= 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]";
 
   return (
-    <div className="grid grid-cols-4 gap-x-6 gap-y-3 px-6 pb-4 pt-2">
+    <div>
+      {stats.label && (
+        <div className="px-6 pb-1">
+          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] font-medium">
+            {stats.label}
+          </span>
+        </div>
+      )}
+      <div className="grid grid-cols-4 gap-x-6 gap-y-3 px-6 pb-4 pt-2">
       <Stat label="P&L" value={`${stats.pnl >= 0 ? "+" : ""}$${Math.abs(stats.pnl).toFixed(2)}`} color={pnlColor} />
       <Stat label="Win Rate" value={stats.totalTrades > 0 ? `${stats.winRate}%` : "--"} />
       <Stat label="Sharpe" value={stats.sharpe} />
@@ -55,6 +65,7 @@ const PerformanceStats = ({ stats }: { stats: AlgoStats }) => {
       <Stat label="Avg Win" value={stats.totalTrades > 0 ? `+$${stats.avgWin.toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-green)]" : undefined} />
       <Stat label="Avg Loss" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.avgLoss).toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
       <Stat label="Max Drawdown" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.maxDrawdown).toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
+      </div>
     </div>
   );
 };
@@ -104,11 +115,15 @@ const AddAlgoPanel = ({
   chartRuns,
   ds,
   onStartAlgo,
+  onOpenAiTerminal,
+  aiTerminalAlgoIds,
 }: {
   algos: Algo[];
   chartRuns: AlgoRun[];
   ds: DataSource;
   onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
+  onOpenAiTerminal?: (algoId: number) => void;
+  aiTerminalAlgoIds?: Set<number>;
 }) => {
   const availableAlgos = algos.filter(
     (a) => !chartRuns.some((r) => r.algo_id === a.id)
@@ -128,28 +143,49 @@ const AddAlgoPanel = ({
         Add Algo
       </div>
       <div className="space-y-2">
-        {availableAlgos.map((algo) => (
-          <div
-            key={algo.id}
-            className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)]"
-          >
-            <span className="text-sm font-medium">{algo.name}</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onStartAlgo(algo.id, "shadow", ds.account, ds.id)}
-                className="px-3 py-1.5 text-[11px] bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)] rounded-md hover:bg-[var(--accent-yellow)]/25 transition-colors font-medium"
-              >
-                Shadow
-              </button>
-              <button
-                onClick={() => onStartAlgo(algo.id, "live", ds.account, ds.id)}
-                className="px-3 py-1.5 text-[11px] bg-[var(--accent-green)]/15 text-[var(--accent-green)] rounded-md hover:bg-[var(--accent-green)]/25 transition-colors font-medium"
-              >
-                Live
-              </button>
+        {availableAlgos.map((algo) => {
+          const hasActiveTerminal = aiTerminalAlgoIds?.has(algo.id) ?? false;
+          return (
+            <div
+              key={algo.id}
+              className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)]"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">{algo.name}</span>
+                {hasActiveTerminal && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse" />
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {onOpenAiTerminal && (
+                  <button
+                    onClick={() => onOpenAiTerminal(algo.id)}
+                    disabled={hasActiveTerminal}
+                    className={`px-3 py-1.5 text-[11px] rounded-md font-medium transition-colors ${
+                      hasActiveTerminal
+                        ? "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]/50 cursor-not-allowed"
+                        : "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/25"
+                    }`}
+                  >
+                    AI
+                  </button>
+                )}
+                <button
+                  onClick={() => onStartAlgo(algo.id, "shadow", ds.account, ds.id)}
+                  className="px-3 py-1.5 text-[11px] bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)] rounded-md hover:bg-[var(--accent-yellow)]/25 transition-colors font-medium"
+                >
+                  Shadow
+                </button>
+                <button
+                  onClick={() => onStartAlgo(algo.id, "live", ds.account, ds.id)}
+                  className="px-3 py-1.5 text-[11px] bg-[var(--accent-green)]/15 text-[var(--accent-green)] rounded-md hover:bg-[var(--accent-green)]/25 transition-colors font-medium"
+                >
+                  Live
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -160,11 +196,15 @@ const RunningInstanceRow = ({
   run,
   stats,
   onStopAlgo,
+  onOpenAiTerminal,
+  hasActiveTerminal,
 }: {
   algo: Algo;
   run: AlgoRun;
   stats: AlgoStats | undefined;
   onStopAlgo: (instanceId: string) => void;
+  onOpenAiTerminal?: (algoId: number) => void;
+  hasActiveTerminal: boolean;
 }) => (
   <div>
     <div className="flex items-center justify-between px-6 py-4">
@@ -179,16 +219,34 @@ const RunningInstanceRow = ({
             }`}>
               {run.mode}
             </span>
+            {hasActiveTerminal && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse" title="AI terminal active" />
+            )}
           </div>
           <div className="text-xs text-[var(--text-secondary)] mt-0.5">{run.account}</div>
         </div>
       </div>
-      <button
-        onClick={() => onStopAlgo(run.instance_id)}
-        className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
-      >
-        Stop
-      </button>
+      <div className="flex items-center gap-2">
+        {onOpenAiTerminal && (
+          <button
+            onClick={() => onOpenAiTerminal(algo.id)}
+            disabled={hasActiveTerminal}
+            className={`px-3 py-1.5 text-[11px] rounded-md font-medium transition-colors ${
+              hasActiveTerminal
+                ? "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]/50 cursor-not-allowed"
+                : "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/25"
+            }`}
+          >
+            AI
+          </button>
+        )}
+        <button
+          onClick={() => onStopAlgo(run.instance_id)}
+          className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
+        >
+          Stop
+        </button>
+      </div>
     </div>
     {stats && <PerformanceStats stats={stats} />}
   </div>
@@ -201,6 +259,8 @@ export const AlgosView = ({
   algoStats,
   onStartAlgo,
   onStopAlgo,
+  onOpenAiTerminal,
+  aiTerminalAlgoIds,
 }: AlgosViewProps) => {
   const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
 
@@ -295,6 +355,8 @@ export const AlgosView = ({
                         run={run}
                         stats={algoStats[run.instance_id]}
                         onStopAlgo={onStopAlgo}
+                        onOpenAiTerminal={onOpenAiTerminal}
+                        hasActiveTerminal={aiTerminalAlgoIds?.has(algo.id) ?? false}
                       />
                     );
                   })
@@ -307,6 +369,8 @@ export const AlgosView = ({
                   chartRuns={chartRuns}
                   ds={selectedDs}
                   onStartAlgo={onStartAlgo}
+                  onOpenAiTerminal={onOpenAiTerminal}
+                  aiTerminalAlgoIds={aiTerminalAlgoIds}
                 />
             </div>
           </>
