@@ -328,17 +328,20 @@ def serialize_orders(instance_id: str, algo_id: str, orders: tuple) -> list[byte
 
 def send_error(push_socket, instance_id: str, algo_id: str, severity: str, category: str, message: str, handler: str = "", traceback_str: str = ""):
     """Send a structured error message to the Rust backend via ZMQ PUSH."""
-    push_socket.send(msgpack.packb({
-        "type": "algo_error",
-        "instance_id": instance_id,
-        "algo_id": algo_id,
-        "severity": severity,
-        "category": category,
-        "message": message,
-        "handler": handler,
-        "traceback": traceback_str,
-        "timestamp": int(time.time() * 1000),
-    }, use_bin_type=True))
+    try:
+        push_socket.send(msgpack.packb({
+            "type": "algo_error",
+            "instance_id": instance_id,
+            "algo_id": algo_id,
+            "severity": severity,
+            "category": category,
+            "message": message,
+            "handler": handler,
+            "traceback": traceback_str,
+            "timestamp": int(time.time() * 1000),
+        }, use_bin_type=True))
+    except Exception:
+        pass
 
 
 def compute_backtest_stats(trades: list[dict]) -> dict:
@@ -437,20 +440,10 @@ def run(args: argparse.Namespace) -> None:
         tb = traceback.format_exc()
         print(f"[runner] Failed to load algo: {exc}", file=sys.stderr)
         sys.stderr.flush()
-        try:
-            push.send(msgpack.packb({
-                "type": "algo_error",
-                "instance_id": args.instance_id,
-                "algo_id": args.algo_id,
-                "severity": "critical",
-                "category": "runtime",
-                "message": f"Failed to load algo: {exc}",
-                "handler": "init",
-                "traceback": tb,
-                "timestamp": int(time.time() * 1000),
-            }, use_bin_type=True))
-        except Exception:
-            pass
+        send_error(push, args.instance_id, args.algo_id,
+                   severity="critical", category="runtime",
+                   message=f"Failed to load algo: {exc}",
+                   handler="init", traceback_str=tb)
         sub.close()
         push.close()
         zmq_ctx.term()
