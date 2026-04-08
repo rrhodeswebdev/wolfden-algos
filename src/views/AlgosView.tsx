@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type AlgoStats, type DataSource } from "../hooks/useTradingSimulation";
+import { type InstanceErrors, type AlgoError } from "../hooks/useAlgoErrors";
 
 type Algo = {
   id: number;
@@ -26,8 +27,10 @@ type AlgosViewProps = {
   dataSources: DataSource[];
   activeRuns: AlgoRun[];
   algoStats: Record<string, AlgoStats>;
+  errorsByInstance: Record<string, InstanceErrors>;
   onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
   onStopAlgo: (instanceId: string) => void;
+  onClearErrors: (instanceId: string) => void;
   onOpenAiTerminal?: (algoId: number) => void;
   aiTerminalAlgoIds?: Set<number>;
 };
@@ -66,6 +69,90 @@ const PerformanceStats = ({ stats }: { stats: AlgoStats }) => {
       <Stat label="Avg Loss" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.avgLoss).toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
       <Stat label="Max Drawdown" value={stats.totalTrades > 0 ? `-$${Math.abs(stats.maxDrawdown).toFixed(2)}` : "--"} color={stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined} />
       </div>
+    </div>
+  );
+};
+
+const ErrorBadge = ({ errors }: { errors: InstanceErrors }) => {
+  if (errors.errorCount === 0 && errors.warningCount === 0) return null;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {errors.errorCount > 0 && (
+        <span className="text-[10px] px-2 py-0.5 rounded-md font-medium bg-[var(--accent-red)]/15 text-[var(--accent-red)]">
+          {errors.errorCount} error{errors.errorCount !== 1 ? "s" : ""}
+        </span>
+      )}
+      {errors.warningCount > 0 && (
+        <span className="text-[10px] px-2 py-0.5 rounded-md font-medium bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]">
+          {errors.warningCount} warning{errors.warningCount !== 1 ? "s" : ""}
+        </span>
+      )}
+      {errors.autoStopped && (
+        <span className="text-[10px] px-2 py-0.5 rounded-md font-medium bg-[var(--accent-red)]/15 text-[var(--accent-red)]">
+          halted
+        </span>
+      )}
+    </div>
+  );
+};
+
+const formatErrorTime = (ts: number) => {
+  const date = new Date(ts);
+  return date.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+};
+
+const ErrorRow = ({ error }: { error: AlgoError }) => {
+  const [expanded, setExpanded] = useState(false);
+  const severityColor = error.severity === "warning"
+    ? "text-[var(--accent-yellow)]"
+    : "text-[var(--accent-red)]";
+
+  return (
+    <div className="border-b border-[var(--border)] last:border-b-0">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left px-4 py-2 hover:bg-[var(--bg-secondary)] transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-[var(--text-secondary)] font-mono shrink-0">
+            {formatErrorTime(error.timestamp)}
+          </span>
+          <span className={`text-[10px] uppercase font-medium shrink-0 ${severityColor}`}>
+            {error.severity}
+          </span>
+          <span className="text-xs text-[var(--text-primary)] truncate">{error.message}</span>
+          {error.handler && (
+            <span className="text-[10px] text-[var(--text-secondary)] shrink-0 font-mono">
+              {error.handler}
+            </span>
+          )}
+        </div>
+      </button>
+      {expanded && error.traceback && (
+        <div className="px-4 pb-3">
+          <pre className="text-[10px] text-[var(--text-secondary)] bg-[var(--bg-primary)] rounded-md p-3 overflow-x-auto font-mono whitespace-pre-wrap">
+            {error.traceback}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ErrorList = ({ errors }: { errors: InstanceErrors }) => {
+  if (errors.errors.length === 0) return null;
+
+  return (
+    <div className="border-t border-[var(--border)] max-h-48 overflow-auto">
+      {errors.autoStopped && (
+        <div className="px-4 py-2 bg-[var(--accent-red)]/10 text-[var(--accent-red)] text-xs font-medium">
+          Algo halted due to repeated errors
+        </div>
+      )}
+      {errors.errors.map((error) => (
+        <ErrorRow key={error.id} error={error} />
+      ))}
     </div>
   );
 };
@@ -195,6 +282,7 @@ const RunningInstanceRow = ({
   algo,
   run,
   stats,
+  instanceErrors,
   onStopAlgo,
   onOpenAiTerminal,
   hasActiveTerminal,
@@ -202,63 +290,79 @@ const RunningInstanceRow = ({
   algo: Algo;
   run: AlgoRun;
   stats: AlgoStats | undefined;
+  instanceErrors: InstanceErrors | undefined;
   onStopAlgo: (instanceId: string) => void;
   onOpenAiTerminal?: (algoId: number) => void;
   hasActiveTerminal: boolean;
-}) => (
-  <div>
-    <div className="flex items-center justify-between px-6 py-4">
-      <div className="flex items-center gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="text-sm font-medium">{algo.name}</div>
-            <span className={`text-[10px] uppercase px-2 py-0.5 rounded-md font-medium ${
-              run.mode === "live"
-                ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
-                : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
-            }`}>
-              {run.mode}
-            </span>
-            {hasActiveTerminal && (
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse" title="AI terminal active" />
-            )}
+}) => {
+  const [showErrors, setShowErrors] = useState(false);
+  const hasErrors = instanceErrors && (instanceErrors.errorCount > 0 || instanceErrors.warningCount > 0);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between px-6 py-4">
+        <div className="flex items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-medium">{algo.name}</div>
+              <span className={`text-[10px] uppercase px-2 py-0.5 rounded-md font-medium ${
+                run.mode === "live"
+                  ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+                  : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
+              }`}>
+                {run.mode}
+              </span>
+              {hasActiveTerminal && (
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse" title="AI terminal active" />
+              )}
+            </div>
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="text-xs text-[var(--text-secondary)]">{run.account}</span>
+              {hasErrors && (
+                <button onClick={() => setShowErrors(!showErrors)}>
+                  <ErrorBadge errors={instanceErrors} />
+                </button>
+              )}
+            </div>
           </div>
-          <div className="text-xs text-[var(--text-secondary)] mt-0.5">{run.account}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {onOpenAiTerminal && (
+            <button
+              onClick={() => onOpenAiTerminal(algo.id)}
+              disabled={hasActiveTerminal}
+              className={`px-3 py-1.5 text-[11px] rounded-md font-medium transition-colors ${
+                hasActiveTerminal
+                  ? "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]/50 cursor-not-allowed"
+                  : "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/25"
+              }`}
+            >
+              AI
+            </button>
+          )}
+          <button
+            onClick={() => onStopAlgo(run.instance_id)}
+            className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
+          >
+            Stop
+          </button>
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        {onOpenAiTerminal && (
-          <button
-            onClick={() => onOpenAiTerminal(algo.id)}
-            disabled={hasActiveTerminal}
-            className={`px-3 py-1.5 text-[11px] rounded-md font-medium transition-colors ${
-              hasActiveTerminal
-                ? "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]/50 cursor-not-allowed"
-                : "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/25"
-            }`}
-          >
-            AI
-          </button>
-        )}
-        <button
-          onClick={() => onStopAlgo(run.instance_id)}
-          className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
-        >
-          Stop
-        </button>
-      </div>
+      {stats && <PerformanceStats stats={stats} />}
+      {showErrors && hasErrors && <ErrorList errors={instanceErrors} />}
     </div>
-    {stats && <PerformanceStats stats={stats} />}
-  </div>
-);
+  );
+};
 
 export const AlgosView = ({
   algos,
   dataSources,
   activeRuns,
   algoStats,
+  errorsByInstance,
   onStartAlgo,
   onStopAlgo,
+  onClearErrors: _onClearErrors,
   onOpenAiTerminal,
   aiTerminalAlgoIds,
 }: AlgosViewProps) => {
@@ -354,6 +458,7 @@ export const AlgosView = ({
                         algo={algo}
                         run={run}
                         stats={algoStats[run.instance_id]}
+                        instanceErrors={errorsByInstance[run.instance_id]}
                         onStopAlgo={onStopAlgo}
                         onOpenAiTerminal={onOpenAiTerminal}
                         hasActiveTerminal={aiTerminalAlgoIds?.has(algo.id) ?? false}
