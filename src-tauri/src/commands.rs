@@ -125,32 +125,38 @@ pub fn start_algo_instance(
     let (pid, handles) = proc_state.0.start_instance(&db_state, &instance_id)?;
     log::info!("start_algo_instance: spawned instance_id={} pid={}", instance_id, pid);
 
-    // Monitor stderr in a background thread
+    // Monitor stderr in a background thread — log lines for debugging,
+    // emit a single error event when the process exits unexpectedly
     let app = app_handle.clone();
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(handles.stderr);
+        let mut last_line = String::new();
         for line in reader.lines() {
             match line {
                 Ok(text) if !text.is_empty() => {
-                    log::warn!("Algo stderr [{}]: {}", handles.instance_id, text);
-                    let _ = app.emit("algo-error", serde_json::json!({
-                        "instance_id": handles.instance_id,
-                        "algo_id": handles.algo_id,
-                        "severity": "error",
-                        "category": "infrastructure",
-                        "message": text,
-                        "handler": "",
-                        "traceback": "",
-                        "timestamp": std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64,
-                    }));
+                    log::info!("Algo stderr [{}]: {}", handles.instance_id, text);
+                    last_line = text;
                 }
                 Err(_) => break,
                 _ => {}
             }
+        }
+        // Process exited — if there was stderr output, emit as a critical error
+        if !last_line.is_empty() {
+            let _ = app.emit("algo-error", serde_json::json!({
+                "instance_id": handles.instance_id,
+                "algo_id": handles.algo_id,
+                "severity": "critical",
+                "category": "infrastructure",
+                "message": format!("Process exited: {}", last_line),
+                "handler": "",
+                "traceback": "",
+                "timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64,
+            }));
         }
     });
 
