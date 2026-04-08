@@ -472,6 +472,29 @@ async fn route_trade_signal(
             let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("?");
             log::debug!("Algo heartbeat: instance={} status={}", instance_id, status);
         }
+        "algo_error" => {
+            let instance_id = val.get("instance_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let algo_id = val.get("algo_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let severity = val.get("severity").and_then(|v| v.as_str()).unwrap_or("error").to_string();
+            let category = val.get("category").and_then(|v| v.as_str()).unwrap_or("runtime").to_string();
+            let message = val.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let handler = val.get("handler").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let traceback = val.get("traceback").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let timestamp = val.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
+
+            log::warn!("Algo error: instance={} severity={} category={} message={}", instance_id, severity, category, message);
+
+            let _ = app_handle.emit("algo-error", serde_json::json!({
+                "instance_id": instance_id,
+                "algo_id": algo_id,
+                "severity": severity,
+                "category": category,
+                "message": message,
+                "handler": handler,
+                "traceback": traceback,
+                "timestamp": timestamp,
+            }));
+        }
         _ => {
             log::warn!("Unknown trade signal type: {}", msg_type);
         }
