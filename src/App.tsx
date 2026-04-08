@@ -52,6 +52,7 @@ export const App = () => {
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
 
   const handleAutoStop = useCallback(async (instanceId: string) => {
+    toast.error(`Algo instance ${instanceId.slice(0, 8)}... halted due to repeated errors`);
     try {
       await invoke("stop_algo_instance", { instanceId });
     } catch (e) {

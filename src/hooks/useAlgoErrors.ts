@@ -44,6 +44,7 @@ export const useAlgoErrors = (
   const [errorsByInstance, setErrorsByInstance] = useState<Record<string, InstanceErrors>>({});
   const nextId = useRef(1);
   const recentErrors = useRef<Record<string, number[]>>({});
+  const autoStoppedInstances = useRef<Set<string>>(new Set());
 
   const clearErrors = useCallback((instanceId: string) => {
     setErrorsByInstance((prev) => {
@@ -52,6 +53,7 @@ export const useAlgoErrors = (
       return next;
     });
     delete recentErrors.current[instanceId];
+    autoStoppedInstances.current.delete(instanceId);
   }, []);
 
   useEffect(() => {
@@ -122,7 +124,9 @@ export const useAlgoErrors = (
         };
       });
 
-      if (shouldAutoStop) {
+      if (shouldAutoStop && !autoStoppedInstances.current.has(e.instance_id)) {
+        autoStoppedInstances.current.add(e.instance_id);
+        delete recentErrors.current[e.instance_id];
         onAutoStop(e.instance_id);
       }
     });
