@@ -25,6 +25,7 @@ import argparse
 import importlib.util
 import sys
 import time
+import traceback
 import msgpack
 import zmq
 
@@ -43,21 +44,30 @@ class RiskManager:
         self.daily_trades = 0
         self.halted = False
 
-    def check_order(self, order) -> bool:
+    def check_order(self, order, error_callback=None) -> bool:
         """Returns False if order would violate risk limits."""
         if self.halted:
             return False
         if self.daily_trades >= self.max_daily_trades:
             self.halted = True
-            print(f"[risk] Max daily trades ({self.max_daily_trades}) reached — halting")
+            msg = f"Max daily trades ({self.max_daily_trades}) reached — halting"
+            print(f"[risk] {msg}")
+            if error_callback:
+                error_callback(severity="warning", category="risk", message=msg)
             return False
         if self.daily_pnl <= -abs(self.max_daily_loss):
             self.halted = True
-            print(f"[risk] Max daily loss (${self.max_daily_loss}) reached — halting")
+            msg = f"Max daily loss (${self.max_daily_loss}) reached — halting"
+            print(f"[risk] {msg}")
+            if error_callback:
+                error_callback(severity="warning", category="risk", message=msg)
             return False
         new_pos = self.position + (order.qty if order.side == "BUY" else -order.qty)
         if abs(new_pos) > self.max_position:
-            print(f"[risk] Order would exceed max position ({self.max_position}) — rejected")
+            msg = f"Order would exceed max position ({self.max_position}) — rejected"
+            print(f"[risk] {msg}")
+            if error_callback:
+                error_callback(severity="warning", category="risk", message=msg)
             return False
         return True
 
@@ -316,6 +326,21 @@ def serialize_orders(instance_id: str, algo_id: str, orders: tuple) -> list[byte
     return messages
 
 
+def send_error(push_socket, instance_id: str, algo_id: str, severity: str, category: str, message: str, handler: str = "", traceback_str: str = ""):
+    """Send a structured error message to the Rust backend via ZMQ PUSH."""
+    push_socket.send(msgpack.packb({
+        "type": "algo_error",
+        "instance_id": instance_id,
+        "algo_id": algo_id,
+        "severity": severity,
+        "category": category,
+        "message": message,
+        "handler": handler,
+        "traceback": traceback_str,
+        "timestamp": int(time.time() * 1000),
+    }, use_bin_type=True))
+
+
 def compute_backtest_stats(trades: list[dict]) -> dict:
     """Compute performance stats from a list of round-trip trades.
 
@@ -405,8 +430,31 @@ def run(args: argparse.Namespace) -> None:
     push.connect(args.trade_signal_addr)
 
     # Load and initialize algo
-    handlers = load_algo_module(args.algo_path)
-    state = handlers["init"]()
+    try:
+        handlers = load_algo_module(args.algo_path)
+        state = handlers["init"]()
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(f"[runner] Failed to load algo: {exc}", file=sys.stderr)
+        sys.stderr.flush()
+        try:
+            push.send(msgpack.packb({
+                "type": "algo_error",
+                "instance_id": args.instance_id,
+                "algo_id": args.algo_id,
+                "severity": "critical",
+                "category": "runtime",
+                "message": f"Failed to load algo: {exc}",
+                "handler": "init",
+                "traceback": tb,
+                "timestamp": int(time.time() * 1000),
+            }, use_bin_type=True))
+        except Exception:
+            pass
+        sub.close()
+        push.close()
+        zmq_ctx.term()
+        return
 
     # Extract symbol from source_id (e.g. "ES 09-26:5min" -> "ES 09-26")
     symbol = args.source_id.rsplit(":", 1)[0] if ":" in args.source_id else args.source_id
@@ -657,6 +705,11 @@ def run(args: argparse.Namespace) -> None:
             "timestamp": int(time.time() * 1000),
         }, use_bin_type=True))
 
+    # Risk error callback for live phase
+    def _risk_error(severity, category, message):
+        send_error(push, args.instance_id, args.algo_id,
+                   severity=severity, category=category, message=message)
+
     # --- Live Phase ---
     try:
         while True:
@@ -670,82 +723,97 @@ def run(args: argparse.Namespace) -> None:
 
             result: AlgoResult | None = None
             ctx = pos_tracker.build_context(symbol, last_price)
+            handler_name = ""
 
-            if msg_type == "tick":
-                tick = make_tick(msg)
-                last_price = tick.price
+            try:
+                if msg_type == "tick":
+                    tick = make_tick(msg)
+                    last_price = tick.price
 
-                # In shadow mode, check if any working orders are triggered by this tick
-                if is_shadow:
-                    triggered = shadow_sim.check_working(tick.price)
-                    if triggered:
-                        state = _process_shadow_fills(triggered, state)
-
-                    # Emit throttled position update for live P&L tracking
-                    now = time.monotonic()
-                    if pos_tracker.position != 0 and (now - last_shadow_pos_emit) >= 0.25:
-                        last_shadow_pos_emit = now
-                        ctx_snap = pos_tracker.build_context(symbol, last_price)
-                        push.send(msgpack.packb({
-                            "type": "shadow_position",
-                            "instance_id": args.instance_id,
-                            "algo_id": args.algo_id,
-                            "symbol": symbol,
-                            "position": pos_tracker.position,
-                            "entry_price": pos_tracker.entry_price,
-                            "unrealized_pnl": ctx_snap.unrealized_pnl,
-                            "timestamp": int(time.time() * 1000),
-                        }, use_bin_type=True))
-
-                ctx = pos_tracker.build_context(symbol, last_price)
-                result = handlers["on_tick"](state, tick, ctx)
-            elif msg_type == "bar":
-                bar = make_bar(msg)
-
-                # Timestamp dedup: skip bars already processed in backtest
-                if bar.timestamp <= last_history_ts:
-                    continue
-
-                last_price = bar.c
-                ctx = pos_tracker.build_context(symbol, last_price)
-                result = handlers["on_bar"](state, bar, ctx)
-            elif msg_type == "fill":
-                if is_shadow:
-                    # In shadow mode, ignore real fills from NinjaTrader
-                    continue
-                fill = make_fill(msg)
-                risk.on_fill(fill)
-                pos_tracker.on_fill(fill)
-                ctx = pos_tracker.build_context(symbol, last_price)
-                result = handlers["on_fill"](state, fill, ctx)
-            elif msg_type == "order_accepted":
-                if is_shadow:
-                    # In shadow mode, order_accepted is handled inline
-                    continue
-                oa = OrderAccepted(
-                    order_id=msg.get("order_id", ""),
-                    timestamp=msg.get("timestamp", 0),
-                )
-                ctx = pos_tracker.build_context(symbol, last_price)
-                result = handlers["on_order_accepted"](state, oa, ctx)
-            else:
-                continue
-
-            if result is not None:
-                state = result.state
-                if result.orders:
+                    # In shadow mode, check if any working orders are triggered by this tick
                     if is_shadow:
-                        state = _submit_shadow_orders(result.orders, state)
-                    else:
-                        filled = tuple(_fill_symbol(o, symbol) for o in result.orders)
-                        # ModifyOrder/CancelOrder skip risk checks (they don't change position)
-                        approved = tuple(
-                            o for o in filled
-                            if isinstance(o, (ModifyOrder, CancelOrder)) or risk.check_order(o)
-                        )
-                        if approved:
-                            for packed in serialize_orders(args.instance_id, args.algo_id, approved):
-                                push.send(packed)
+                        triggered = shadow_sim.check_working(tick.price)
+                        if triggered:
+                            state = _process_shadow_fills(triggered, state)
+
+                        # Emit throttled position update for live P&L tracking
+                        now = time.monotonic()
+                        if pos_tracker.position != 0 and (now - last_shadow_pos_emit) >= 0.25:
+                            last_shadow_pos_emit = now
+                            ctx_snap = pos_tracker.build_context(symbol, last_price)
+                            push.send(msgpack.packb({
+                                "type": "shadow_position",
+                                "instance_id": args.instance_id,
+                                "algo_id": args.algo_id,
+                                "symbol": symbol,
+                                "position": pos_tracker.position,
+                                "entry_price": pos_tracker.entry_price,
+                                "unrealized_pnl": ctx_snap.unrealized_pnl,
+                                "timestamp": int(time.time() * 1000),
+                            }, use_bin_type=True))
+
+                    ctx = pos_tracker.build_context(symbol, last_price)
+                    handler_name = "on_tick"
+                    result = handlers["on_tick"](state, tick, ctx)
+                elif msg_type == "bar":
+                    bar = make_bar(msg)
+
+                    # Timestamp dedup: skip bars already processed in backtest
+                    if bar.timestamp <= last_history_ts:
+                        continue
+
+                    last_price = bar.c
+                    ctx = pos_tracker.build_context(symbol, last_price)
+                    handler_name = "on_bar"
+                    result = handlers["on_bar"](state, bar, ctx)
+                elif msg_type == "fill":
+                    if is_shadow:
+                        # In shadow mode, ignore real fills from NinjaTrader
+                        continue
+                    fill = make_fill(msg)
+                    risk.on_fill(fill)
+                    pos_tracker.on_fill(fill)
+                    ctx = pos_tracker.build_context(symbol, last_price)
+                    handler_name = "on_fill"
+                    result = handlers["on_fill"](state, fill, ctx)
+                elif msg_type == "order_accepted":
+                    if is_shadow:
+                        # In shadow mode, order_accepted is handled inline
+                        continue
+                    oa = OrderAccepted(
+                        order_id=msg.get("order_id", ""),
+                        timestamp=msg.get("timestamp", 0),
+                    )
+                    ctx = pos_tracker.build_context(symbol, last_price)
+                    handler_name = "on_order_accepted"
+                    result = handlers["on_order_accepted"](state, oa, ctx)
+                else:
+                    continue
+
+                if result is not None:
+                    state = result.state
+                    if result.orders:
+                        if is_shadow:
+                            state = _submit_shadow_orders(result.orders, state)
+                        else:
+                            filled = tuple(_fill_symbol(o, symbol) for o in result.orders)
+                            # ModifyOrder/CancelOrder skip risk checks (they don't change position)
+                            approved = tuple(
+                                o for o in filled
+                                if isinstance(o, (ModifyOrder, CancelOrder)) or risk.check_order(o, error_callback=_risk_error)
+                            )
+                            if approved:
+                                for packed in serialize_orders(args.instance_id, args.algo_id, approved):
+                                    push.send(packed)
+            except Exception:
+                tb = traceback.format_exc()
+                print(f"[runner] Exception in {handler_name or msg_type}: {tb}", file=sys.stderr)
+                sys.stderr.flush()
+                send_error(push, args.instance_id, args.algo_id,
+                           severity="error", category="runtime",
+                           message=f"Exception in handler: {handler_name or msg_type}",
+                           handler=handler_name, traceback_str=tb)
+                continue
 
     except KeyboardInterrupt:
         print(f"[runner] Instance {args.instance_id} shutting down")
