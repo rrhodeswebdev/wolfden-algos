@@ -2,11 +2,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use crate::db::{self, DbState};
 use crate::zmq_hub;
+
+/// Handles from a spawned algo process for output monitoring.
+pub struct ProcessHandles {
+    pub stderr: std::process::ChildStderr,
+    pub stdout: std::process::ChildStdout,
+    pub instance_id: String,
+    pub algo_id: String,
+}
 
 /// Manages Python algo processes — spawn, track, kill.
 ///
@@ -59,7 +67,7 @@ impl ProcessManager {
         &self,
         db_state: &DbState,
         instance_id: &str,
-    ) -> Result<u32, String> {
+    ) -> Result<(u32, ProcessHandles), String> {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
 
         // Fetch instance and algo details from DB
@@ -78,7 +86,7 @@ impl ProcessManager {
         }
 
         // Spawn runner.py
-        let child = Command::new("python3")
+        let mut child = Command::new("python3")
             .arg(self.runner_path.to_str().unwrap_or("algo_runtime/runner.py"))
             .arg("--algo-path")
             .arg(algo_file.to_str().unwrap_or(""))
@@ -102,10 +110,17 @@ impl ProcessManager {
             .arg(instance.max_daily_loss.to_string())
             .arg("--max-daily-trades")
             .arg(instance.max_daily_trades.to_string())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to spawn runner.py: {}", e))?;
 
         let pid = child.id();
+        let stderr = child.stderr.take()
+            .ok_or("Failed to capture stderr from algo process")?;
+        let stdout = child.stdout.take()
+            .ok_or("Failed to capture stdout from algo process")?;
+        let algo_id_str = instance.algo_id.to_string();
         log::info!(
             "Spawned algo process: instance={} algo={} pid={} source={}",
             instance_id, algo.name, pid, instance.data_source_id
@@ -122,7 +137,12 @@ impl ProcessManager {
             .map_err(|e| e.to_string())?
             .insert(instance_id.to_string(), child);
 
-        Ok(pid)
+        Ok((pid, ProcessHandles {
+            stderr,
+            stdout,
+            instance_id: instance_id.to_string(),
+            algo_id: algo_id_str,
+        }))
     }
 
     /// Stops all running algo processes and marks them as stopped in the DB.

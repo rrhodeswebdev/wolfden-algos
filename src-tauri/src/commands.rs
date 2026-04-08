@@ -1,6 +1,7 @@
 use crate::db::{self, DbState};
 use crate::types::{Algo, AlgoInstance, AlgoRun, DataSource, RiskConfig, Session, Trade};
 use crate::{AiTermState, ProcState};
+use tauri::Emitter;
 
 #[tauri::command]
 pub fn get_algos(state: tauri::State<DbState>) -> Result<Vec<Algo>, String> {
@@ -117,11 +118,42 @@ pub fn create_algo_instance(
 pub fn start_algo_instance(
     db_state: tauri::State<DbState>,
     proc_state: tauri::State<ProcState>,
+    app_handle: tauri::AppHandle,
     instance_id: String,
 ) -> Result<(), String> {
     log::info!("start_algo_instance: received request for instance_id={}", instance_id);
-    proc_state.0.start_instance(&db_state, &instance_id)?;
-    log::info!("start_algo_instance: spawned instance_id={}", instance_id);
+    let (pid, handles) = proc_state.0.start_instance(&db_state, &instance_id)?;
+    log::info!("start_algo_instance: spawned instance_id={} pid={}", instance_id, pid);
+
+    // Monitor stderr in a background thread
+    let app = app_handle.clone();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(handles.stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(text) if !text.is_empty() => {
+                    log::warn!("Algo stderr [{}]: {}", handles.instance_id, text);
+                    let _ = app.emit("algo-error", serde_json::json!({
+                        "instance_id": handles.instance_id,
+                        "algo_id": handles.algo_id,
+                        "severity": "error",
+                        "category": "infrastructure",
+                        "message": text,
+                        "handler": "",
+                        "traceback": "",
+                        "timestamp": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64,
+                    }));
+                }
+                Err(_) => break,
+                _ => {}
+            }
+        }
+    });
+
     Ok(())
 }
 
