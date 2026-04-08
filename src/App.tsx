@@ -12,6 +12,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
+import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import type { DataSource } from "./hooks/useTradingSimulation";
 
 type Algo = {
@@ -49,6 +50,18 @@ export const App = () => {
   const [aiTerminalAlgoIds, setAiTerminalAlgoIds] = useState<Set<number>>(new Set());
 
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
+
+  const handleAutoStop = useCallback(async (instanceId: string) => {
+    try {
+      await invoke("stop_algo_instance", { instanceId });
+    } catch (e) {
+      console.error("Failed to auto-stop algo:", e);
+    }
+    setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
+  }, []);
+
+  const { errorsByInstance, clearErrors } = useAlgoErrors(handleAutoStop);
+
   const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
   const aiTerminalAlgos = algos.filter((a) => aiTerminalAlgoIds.has(a.id));
 
@@ -265,6 +278,7 @@ export const App = () => {
         dependencies: "",
       });
       setAlgos((prev) => [algo, ...prev]);
+      setSelectedAlgoId(algo.id);
       setAiTerminalAlgoIds((prev) => new Set(prev).add(algo.id));
     } catch (e) {
       console.error("Failed to create algo:", e);
@@ -320,6 +334,7 @@ export const App = () => {
     }
     // Always remove from UI even if backend call fails
     setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
+    clearErrors(instanceId);
   };
 
   return (
@@ -368,8 +383,10 @@ export const App = () => {
           dataSources={dataSources}
           activeRuns={activeRuns}
           algoStats={simulation.algoStats}
+          errorsByInstance={errorsByInstance}
           onStartAlgo={handleStartAlgo}
           onStopAlgo={handleStopAlgo}
+          onClearErrors={clearErrors}
           onOpenAiTerminal={handleOpenAiTerminal}
           aiTerminalAlgoIds={aiTerminalAlgoIds}
         />
