@@ -16,6 +16,7 @@ type EditorViewProps = {
   algos: Algo[];
   selectedAlgoId: number | null;
   editorCode: string;
+  editorDeps: string;
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
   onCreateAlgoWithAi?: () => void;
@@ -24,6 +25,7 @@ type EditorViewProps = {
   onDeleteAlgo: (id: number) => void;
   onRenameAlgo: (id: number, newName: string) => void;
   onEditorChange: (code: string) => void;
+  onDepsChange: (deps: string) => void;
   onSaveAlgo: () => void;
 };
 
@@ -31,6 +33,7 @@ export const EditorView = ({
   algos,
   selectedAlgoId,
   editorCode,
+  editorDeps,
   onSelectAlgo,
   onCreateAlgo,
   onCreateAlgoWithAi,
@@ -39,6 +42,7 @@ export const EditorView = ({
   onDeleteAlgo,
   onRenameAlgo,
   onEditorChange,
+  onDepsChange,
   onSaveAlgo,
 }: EditorViewProps) => {
   return (
@@ -63,7 +67,9 @@ export const EditorView = ({
         {selectedAlgoId !== null ? (
           <AlgoEditor
             code={editorCode}
+            dependencies={editorDeps}
             onChange={onEditorChange}
+            onDepsChange={onDepsChange}
             onSave={onSaveAlgo}
           />
         ) : (

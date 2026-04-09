@@ -46,6 +46,7 @@ export const App = () => {
   const [algos, setAlgos] = useState<Algo[]>([]);
   const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
   const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
+  const [editorDeps, setEditorDeps] = useState("");
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
   const [aiTerminalAlgoIds, setAiTerminalAlgoIds] = useState<Set<number>>(new Set());
@@ -182,6 +183,7 @@ export const App = () => {
   useEffect(() => {
     if (selectedAlgo) {
       setEditorCode(selectedAlgo.code);
+      setEditorDeps(selectedAlgo.dependencies);
     }
   }, [selectedAlgo?.id]);
 
@@ -208,7 +210,7 @@ export const App = () => {
         id: selectedAlgo.id,
         name: selectedAlgo.name,
         code: editorCode,
-        dependencies: selectedAlgo.dependencies,
+        dependencies: editorDeps,
       });
       await loadAlgos();
     } catch (e) {
@@ -232,7 +234,7 @@ export const App = () => {
     }
   };
 
-  const hasUnsavedChanges = selectedAlgo ? editorCode !== selectedAlgo.code : false;
+  const hasUnsavedChanges = selectedAlgo ? editorCode !== selectedAlgo.code || editorDeps !== selectedAlgo.dependencies : false;
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
 
   const handleNavigate = (view: View) => {
@@ -242,7 +244,10 @@ export const App = () => {
         message: "You have unsaved changes. Leave without saving?",
         confirmLabel: "Leave",
         onConfirm: () => {
-          if (selectedAlgo) setEditorCode(selectedAlgo.code);
+          if (selectedAlgo) {
+            setEditorCode(selectedAlgo.code);
+            setEditorDeps(selectedAlgo.dependencies);
+          }
           setActiveView(view);
           setConfirmDialog(null);
         },
@@ -398,6 +403,7 @@ export const App = () => {
           algos={algos}
           selectedAlgoId={selectedAlgoId}
           editorCode={editorCode}
+          editorDeps={editorDeps}
           onSelectAlgo={handleSelectAlgo}
           onCreateAlgo={handleCreateAlgo}
           onCreateAlgoWithAi={handleCreateAlgoWithAi}
@@ -406,6 +412,7 @@ export const App = () => {
           onDeleteAlgo={handleDeleteAlgo}
           onRenameAlgo={handleRenameAlgo}
           onEditorChange={setEditorCode}
+          onDepsChange={setEditorDeps}
           onSaveAlgo={handleSaveAlgo}
         />
       )}
