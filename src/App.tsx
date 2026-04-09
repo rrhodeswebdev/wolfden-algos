@@ -14,6 +14,7 @@ import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import type { DataSource } from "./hooks/useTradingSimulation";
+import { VenvSetupModal } from "./components/VenvSetupModal";
 
 type Algo = {
   id: number;
@@ -48,6 +49,7 @@ export const App = () => {
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
   const [aiTerminalAlgoIds, setAiTerminalAlgoIds] = useState<Set<number>>(new Set());
+  const [venvReady, setVenvReady] = useState<boolean | null>(null);
 
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
 
@@ -100,6 +102,22 @@ export const App = () => {
     loadAlgos();
     loadRunningInstances();
   }, [loadAlgos, loadRunningInstances]);
+
+  useEffect(() => {
+    const checkVenv = async () => {
+      try {
+        const status = await invoke<{ healthy: boolean }>("check_venv_status");
+        if (status.healthy) {
+          setVenvReady(true);
+        } else {
+          setVenvReady(false);
+        }
+      } catch {
+        setVenvReady(false);
+      }
+    };
+    checkVenv();
+  }, []);
 
   useEffect(() => {
     const u1 = listen<number>("nt-connection-count", (event) => {
@@ -414,6 +432,10 @@ export const App = () => {
         />
       )}
       </div>
+
+      {venvReady === false && (
+        <VenvSetupModal onComplete={() => setVenvReady(true)} />
+      )}
 
       {confirmDialog !== null && (
         <ConfirmDialog
