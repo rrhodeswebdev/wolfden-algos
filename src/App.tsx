@@ -323,6 +323,7 @@ export const App = () => {
 
   const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => {
     console.log("[handleStartAlgo] called:", { id, mode, account, dataSourceId });
+    let instanceId: string | null = null;
     try {
       // Create the instance in the DB first
       const instance = await invoke<{ id: string }>("create_algo_instance", {
@@ -331,26 +332,29 @@ export const App = () => {
         account,
         mode,
       });
-      console.log("[handleStartAlgo] instance created:", instance.id);
+      instanceId = instance.id;
+      console.log("[handleStartAlgo] instance created:", instanceId);
 
       // Show "installing" status while deps install + process starts
       setActiveRuns((prev) => [...prev, {
         algo_id: id, status: "installing", mode, account,
-        data_source_id: dataSourceId, instance_id: instance.id,
+        data_source_id: dataSourceId, instance_id: instanceId!,
       }]);
 
       // start_algo_instance now handles dep installation before spawning
-      await invoke("start_algo_instance", { instanceId: instance.id });
+      await invoke("start_algo_instance", { instanceId });
       console.log("[handleStartAlgo] process started, updating to running");
 
       // Update status to running
       setActiveRuns((prev) => prev.map((r) =>
-        r.instance_id === instance.id ? { ...r, status: "running" } : r
+        r.instance_id === instanceId ? { ...r, status: "running" } : r
       ));
     } catch (e) {
       console.error("Failed to start algo:", e);
-      // Remove the "installing" entry on failure
-      setActiveRuns((prev) => prev.filter((r) => !(r.algo_id === id && r.status === "installing")));
+      // Remove the "installing" entry on failure (if instance was created)
+      if (instanceId) {
+        setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
+      }
       toast.error("Failed to start algo: " + e);
     }
   };
