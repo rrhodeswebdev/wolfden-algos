@@ -305,13 +305,20 @@ const RunningInstanceRow = ({
           <div>
             <div className="flex items-center gap-2">
               <div className="text-sm font-medium">{algo.name}</div>
-              <span className={`text-[10px] uppercase px-2 py-0.5 rounded-md font-medium ${
-                run.mode === "live"
-                  ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
-                  : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
-              }`}>
-                {run.mode}
-              </span>
+              {run.status === "installing" ? (
+                <span className="text-[10px] uppercase px-2 py-0.5 rounded-md font-medium bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] flex items-center gap-1.5">
+                  <span className="w-3 h-3 border-2 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin" />
+                  installing deps
+                </span>
+              ) : (
+                <span className={`text-[10px] uppercase px-2 py-0.5 rounded-md font-medium ${
+                  run.mode === "live"
+                    ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+                    : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]"
+                }`}>
+                  {run.mode}
+                </span>
+              )}
               {hasActiveTerminal && (
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse" title="AI terminal active" />
               )}
@@ -342,9 +349,14 @@ const RunningInstanceRow = ({
           )}
           <button
             onClick={() => onStopAlgo(run.instance_id)}
-            className="px-4 py-2 text-xs bg-[var(--accent-red)] text-white rounded-md hover:opacity-90 transition-opacity font-medium"
+            disabled={run.status === "installing"}
+            className={`px-4 py-2 text-xs rounded-md font-medium transition-opacity ${
+              run.status === "installing"
+                ? "bg-[var(--bg-secondary)] text-[var(--text-secondary)] cursor-not-allowed"
+                : "bg-[var(--accent-red)] text-white hover:opacity-90"
+            }`}
           >
-            Stop
+            {run.status === "installing" ? "Installing..." : "Stop"}
           </button>
         </div>
       </div>

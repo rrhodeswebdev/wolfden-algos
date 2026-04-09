@@ -332,16 +332,26 @@ export const App = () => {
         mode,
       });
       console.log("[handleStartAlgo] instance created:", instance.id);
-      // Then spawn the Python process
-      await invoke("start_algo_instance", { instanceId: instance.id });
-      console.log("[handleStartAlgo] process started, adding to activeRuns");
+
+      // Show "installing" status while deps install + process starts
       setActiveRuns((prev) => [...prev, {
-        algo_id: id, status: "running", mode, account,
+        algo_id: id, status: "installing", mode, account,
         data_source_id: dataSourceId, instance_id: instance.id,
       }]);
+
+      // start_algo_instance now handles dep installation before spawning
+      await invoke("start_algo_instance", { instanceId: instance.id });
+      console.log("[handleStartAlgo] process started, updating to running");
+
+      // Update status to running
+      setActiveRuns((prev) => prev.map((r) =>
+        r.instance_id === instance.id ? { ...r, status: "running" } : r
+      ));
     } catch (e) {
       console.error("Failed to start algo:", e);
-      alert("Failed to start algo: " + e);
+      // Remove the "installing" entry on failure
+      setActiveRuns((prev) => prev.filter((r) => !(r.algo_id === id && r.status === "installing")));
+      toast.error("Failed to start algo: " + e);
     }
   };
 
