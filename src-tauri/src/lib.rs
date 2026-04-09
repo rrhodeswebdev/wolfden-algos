@@ -26,6 +26,9 @@ pub struct ProcState(pub process_manager::ProcessManager);
 /// Shared AI terminal state for Claude Code PTY sessions.
 pub struct AiTermState(pub ai_terminal::AiTerminalManager);
 
+/// Shared venv manager state for commands to setup/query the Python environment.
+pub struct VenvState(pub venv_manager::VenvManager);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -51,8 +54,13 @@ pub fn run() {
 
             log::info!("Wolf Den initialized. Database at {:?}", db_path);
 
-            // Initialize process manager
-            app.manage(ProcState(process_manager::ProcessManager::new(data_dir.clone())));
+            // Initialize venv manager
+            let venv_mgr = venv_manager::VenvManager::new(&data_dir);
+            let venv_python = venv_mgr.python_path();
+            app.manage(VenvState(venv_mgr));
+
+            // Initialize process manager with venv python path
+            app.manage(ProcState(process_manager::ProcessManager::new(data_dir.clone(), venv_python)));
 
             // Initialize AI terminal manager
             app.manage(AiTermState(ai_terminal::AiTerminalManager::new(db_path.clone())));
@@ -220,6 +228,9 @@ pub fn run() {
             commands::resize_ai_terminal,
             commands::close_ai_terminal,
             commands::get_active_ai_terminals,
+            commands::check_venv_status,
+            commands::setup_venv,
+            commands::install_algo_deps,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {

@@ -1,6 +1,7 @@
 use crate::db::{self, DbState};
 use crate::types::{Algo, AlgoInstance, AlgoRun, DataSource, RiskConfig, Session, Trade};
-use crate::{AiTermState, ProcState};
+use crate::{AiTermState, ProcState, VenvState};
+use crate::venv_manager;
 use tauri::Emitter;
 
 #[tauri::command]
@@ -118,15 +119,44 @@ pub fn create_algo_instance(
 pub fn start_algo_instance(
     db_state: tauri::State<DbState>,
     proc_state: tauri::State<ProcState>,
+    venv_state: tauri::State<VenvState>,
     app_handle: tauri::AppHandle,
     instance_id: String,
 ) -> Result<(), String> {
     log::info!("start_algo_instance: received request for instance_id={}", instance_id);
+
+    // Install per-algo deps if needed before spawning
+    {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let instance = db::get_algo_instance_by_id(&conn, &instance_id)
+            .map_err(|e| format!("Instance not found: {}", e))?;
+        let algo = db::get_algo_by_id(&conn, instance.algo_id)
+            .map_err(|e| format!("Algo not found: {}", e))?;
+
+        let deps = algo.dependencies.trim().to_string();
+        if !deps.is_empty() {
+            let current_hash = venv_manager::VenvManager::hash_deps(&deps);
+            if current_hash != algo.deps_hash {
+                log::info!("Installing dependencies for algo {} (hash changed)", algo.name);
+                let result = venv_state.0.install_algo_deps(&deps);
+                if !result.success {
+                    return Err(format!("Failed to install dependencies:\n{}", result.output));
+                }
+                // Update deps_hash
+                conn.execute(
+                    "UPDATE algos SET deps_hash = ?1 WHERE id = ?2",
+                    rusqlite::params![current_hash, instance.algo_id],
+                )
+                .map_err(|e| format!("Failed to update deps_hash: {}", e))?;
+                log::info!("Dependencies installed for algo {}", algo.name);
+            }
+        }
+    }
+
     let (pid, handles) = proc_state.0.start_instance(&db_state, &instance_id)?;
     log::info!("start_algo_instance: spawned instance_id={} pid={}", instance_id, pid);
 
-    // Monitor stderr in a background thread — log lines for debugging,
-    // emit a single error event when the process exits unexpectedly
+    // Monitor stderr in a background thread
     let app = app_handle.clone();
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
@@ -142,7 +172,6 @@ pub fn start_algo_instance(
                 _ => {}
             }
         }
-        // Process exited — if there was stderr output, emit as a critical error
         if !last_line.is_empty() {
             let _ = app.emit("algo-error", serde_json::json!({
                 "instance_id": handles.instance_id,
@@ -247,4 +276,60 @@ pub fn get_active_ai_terminals(
     ai_state: tauri::State<AiTermState>,
 ) -> Result<Vec<i64>, String> {
     Ok(ai_state.0.active_algo_ids())
+}
+
+// --- Python Venv ---
+
+#[tauri::command]
+pub fn check_venv_status(
+    venv_state: tauri::State<VenvState>,
+) -> Result<serde_json::Value, String> {
+    let healthy = venv_state.0.is_venv_healthy();
+    Ok(serde_json::json!({
+        "healthy": healthy,
+        "python_path": venv_state.0.python_path().to_string_lossy(),
+    }))
+}
+
+#[tauri::command]
+pub fn setup_venv(
+    venv_state: tauri::State<VenvState>,
+) -> Result<String, String> {
+    venv_state.0.ensure_setup()
+}
+
+#[tauri::command]
+pub fn install_algo_deps(
+    db_state: tauri::State<DbState>,
+    venv_state: tauri::State<VenvState>,
+    algo_id: i64,
+) -> Result<String, String> {
+    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let algo = db::get_algo_by_id(&conn, algo_id)
+        .map_err(|e| format!("Algo not found: {}", e))?;
+
+    let deps = algo.dependencies.trim();
+    if deps.is_empty() {
+        return Ok("No dependencies to install.".to_string());
+    }
+
+    // Check if deps have changed since last install
+    let current_hash = venv_manager::VenvManager::hash_deps(deps);
+    if current_hash == algo.deps_hash {
+        return Ok("Dependencies already up to date.".to_string());
+    }
+
+    // Install deps
+    let result = venv_state.0.install_algo_deps(deps);
+    if result.success {
+        // Update deps_hash in DB
+        conn.execute(
+            "UPDATE algos SET deps_hash = ?1 WHERE id = ?2",
+            rusqlite::params![current_hash, algo_id],
+        )
+        .map_err(|e| format!("Failed to update deps_hash: {}", e))?;
+        Ok(result.output)
+    } else {
+        Err(result.output)
+    }
 }

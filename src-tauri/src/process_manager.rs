@@ -23,20 +23,21 @@ pub struct ProcessManager {
     processes: Mutex<HashMap<String, Child>>,
     algo_dir: PathBuf,
     runner_path: PathBuf,
+    venv_python: PathBuf,
 }
 
 impl ProcessManager {
-    pub fn new(app_data_dir: PathBuf) -> Self {
+    pub fn new(app_data_dir: PathBuf, venv_python: PathBuf) -> Self {
         let algo_dir = app_data_dir.join("algos");
         fs::create_dir_all(&algo_dir).ok();
 
-        // runner.py lives in algo_runtime/ relative to the binary or the project root
         let runner_path = Self::find_runner();
 
         ProcessManager {
             processes: Mutex::new(HashMap::new()),
             algo_dir,
             runner_path,
+            venv_python,
         }
     }
 
@@ -85,7 +86,7 @@ impl ProcessManager {
         }
 
         // Spawn runner.py
-        let mut child = Command::new("python3")
+        let mut child = Command::new(&self.venv_python)
             .arg(self.runner_path.to_str().unwrap_or("algo_runtime/runner.py"))
             .arg("--algo-path")
             .arg(algo_file.to_str().unwrap_or(""))
