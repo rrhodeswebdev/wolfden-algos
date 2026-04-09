@@ -53,3 +53,6 @@ portable-pty = "0.8"
 
 # File watching for AI terminal → DB sync
 notify = "7"
+
+# Hashing for dependency change detection
+sha2 = "0.10"

@@ -5,6 +5,7 @@ mod websocket_server;
 mod zmq_hub;
 mod commands;
 mod types;
+mod venv_manager;
 
 use std::sync::Arc;
 use tauri::Manager;
