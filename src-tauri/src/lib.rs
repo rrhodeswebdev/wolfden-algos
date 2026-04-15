@@ -8,7 +8,7 @@ mod types;
 mod venv_manager;
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::{broadcast, RwLock};
 
 /// Shared WebSocket state so commands can access the connection registry
@@ -199,6 +199,40 @@ pub fn run() {
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                         _ => {}
+                    }
+                }
+            });
+
+            // Health emitter — periodic algo-health events for the frontend log panel
+            let health_handle = app.handle().clone();
+            let health_registry = registry.clone();
+            let health_db_path = db_path.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+                loop {
+                    interval.tick().await;
+                    let instances = {
+                        let conn = match rusqlite::Connection::open(&health_db_path) {
+                            Ok(c) => c,
+                            Err(_) => continue,
+                        };
+                        match db::get_algo_instances(&conn, None) {
+                            Ok(list) => list.into_iter().filter(|i| i.status == "running").collect::<Vec<_>>(),
+                            Err(_) => continue,
+                        }
+                    };
+
+                    let reg = health_registry.read().await;
+                    for inst in &instances {
+                        let ws_connected = reg.get_sender(&inst.data_source_id).is_some();
+                        let _ = health_handle.emit("algo-health", serde_json::json!({
+                            "instance_id": inst.id,
+                            "ws_connected": ws_connected,
+                            "zmq_active": true,
+                            "process_alive": inst.pid.is_some(),
+                            "bars_per_sec": 0,
+                            "last_heartbeat_secs_ago": 0,
+                        }));
                     }
                 }
             });
