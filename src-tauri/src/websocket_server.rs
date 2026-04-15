@@ -267,6 +267,7 @@ pub async fn start(
                                     drop(tracker);
 
                                     if let Some(ref name) = *acct {
+                                        let side_clone = side.clone();
                                         let _ = app_handle.emit("nt-order-update", OrderEvent {
                                             source_id: msg_source_id.clone(),
                                             account: name.clone(),
@@ -282,6 +283,24 @@ pub async fn start(
                                             error: error.clone(),
                                             timestamp,
                                         });
+                                        // Emit algo-log for live fills
+                                        if state == "filled" || state == "Filled" {
+                                            let _ = app_handle.emit("algo-log", serde_json::json!({
+                                                "instance_id": instance_id,
+                                                "algo_id": "",
+                                                "event_type": "FILL",
+                                                "message": format!("{} {} @ {:.2} filled",
+                                                    side_clone.as_deref().unwrap_or("?"),
+                                                    filled_qty.unwrap_or(0),
+                                                    fill_price.unwrap_or(0.0)),
+                                                "timestamp": timestamp.unwrap_or_else(|| {
+                                                    std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .unwrap_or_default()
+                                                        .as_millis() as i64
+                                                }),
+                                            }));
+                                        }
                                     }
                                 }
 
