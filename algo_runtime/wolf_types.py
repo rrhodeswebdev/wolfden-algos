@@ -141,3 +141,11 @@ def bracket(
     sl = Order(exit_side, symbol, qty, "STOP", 0.0, stop_loss_price)
     tp = Order(exit_side, symbol, qty, "LIMIT", take_profit_price, 0.0)
     return BracketOrder(symbol, entry, sl, tp)
+
+
+def log(message: str) -> None:
+    """Print a structured log message visible in the Wolf Den log panel.
+
+    Usage in algos: log("entry triggered, z-score: -2.14")
+    """
+    print(f"[SIGNAL] {message}", flush=True)
