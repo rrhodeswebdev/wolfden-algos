@@ -13,6 +13,8 @@ import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
+import { useAlgoLogs } from "./hooks/useAlgoLogs";
+import { useAlgoHealth } from "./hooks/useAlgoHealth";
 import type { DataSource } from "./hooks/useTradingSimulation";
 import { VenvSetupModal } from "./components/VenvSetupModal";
 
@@ -65,6 +67,8 @@ export const App = () => {
   }, []);
 
   const { errorsByInstance, clearErrors } = useAlgoErrors(handleAutoStop);
+  const { logsByInstance, clearLogs } = useAlgoLogs();
+  const { healthByInstance } = useAlgoHealth();
 
   const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
   const aiTerminalAlgos = algos.filter((a) => aiTerminalAlgoIds.has(a.id));
@@ -373,6 +377,7 @@ export const App = () => {
     // Always remove from UI even if backend call fails
     setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
     clearErrors(instanceId);
+    clearLogs(instanceId);
   };
 
   return (
@@ -424,9 +429,12 @@ export const App = () => {
           activeRuns={activeRuns}
           algoStats={simulation.algoStats}
           errorsByInstance={errorsByInstance}
+          logsByInstance={logsByInstance}
+          healthByInstance={healthByInstance}
           onStartAlgo={handleStartAlgo}
           onStopAlgo={handleStopAlgo}
           onClearErrors={clearErrors}
+          onClearLogs={clearLogs}
           onOpenAiTerminal={handleOpenAiTerminal}
           aiTerminalAlgoIds={aiTerminalAlgoIds}
         />
