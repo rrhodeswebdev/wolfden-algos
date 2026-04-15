@@ -293,11 +293,11 @@ async fn route_trade_signal(
             let outbound = NtOutbound::Order {
                 id: order_id.clone(),
                 instance_id: instance_id.clone(),
-                algo_id,
+                algo_id: algo_id.clone(),
                 action: action.to_string(),
                 symbol: symbol.clone(),
                 qty,
-                order_type,
+                order_type: order_type.clone(),
                 limit_price,
                 stop_price,
             };
@@ -307,6 +307,18 @@ async fn route_trade_signal(
             if let Some(sender) = reg.find_sender_by_symbol(&symbol) {
                 sender.send(outbound).await.map_err(|e| format!("Send to WS failed: {}", e))?;
                 log::info!("Routed order {} from instance {} to NinjaTrader", order_id, instance_id);
+
+                // Emit algo-log for the order
+                let _ = app_handle.emit("algo-log", serde_json::json!({
+                    "instance_id": instance_id,
+                    "algo_id": algo_id,
+                    "event_type": "ORDER",
+                    "message": format!("{} {} {} @ {} → NinjaTrader", side, qty, symbol, order_type),
+                    "timestamp": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64,
+                }));
 
                 // Send order_accepted acknowledgment back to the algo
                 let now_ms = std::time::SystemTime::now()
@@ -404,7 +416,7 @@ async fn route_trade_signal(
                 order_id: order_id.clone(),
                 state: String::from("filled"),
                 symbol: symbol.clone(),
-                side: Some(side),
+                side: Some(side.clone()),
                 filled_qty: Some(qty),
                 avg_fill_price: Some(price),
                 fill_price: Some(price),
@@ -425,7 +437,7 @@ async fn route_trade_signal(
             let _ = app_handle.emit("nt-position", PositionEvent {
                 source_id: String::new(),
                 account: String::from("shadow"),
-                symbol,
+                symbol: symbol.clone(),
                 direction: direction.to_string(),
                 qty: position.abs(),
                 avg_price: entry_price,
@@ -433,6 +445,20 @@ async fn route_trade_signal(
             });
 
             log::info!("Shadow fill: instance={} algo={} order={}", instance_id, algo_id, order_id);
+
+            // Emit algo-log for the fill
+            let _ = app_handle.emit("algo-log", serde_json::json!({
+                "instance_id": instance_id,
+                "algo_id": algo_id,
+                "event_type": "FILL",
+                "message": format!("{} {} {} @ {:.2} filled", side, qty, symbol, price),
+                "timestamp": timestamp.unwrap_or_else(|| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                }),
+            }));
         }
         "shadow_position" => {
             // Throttled position update for live P&L tracking in shadow mode
@@ -467,10 +493,19 @@ async fn route_trade_signal(
             let _ = app_handle.emit("algo-backtest-result", val.clone());
         }
         "heartbeat" => {
-            // Algo heartbeat — log for now
-            let instance_id = val.get("instance_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let instance_id = val.get("instance_id").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+            let algo_id = val.get("algo_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            let timestamp = val.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
             log::debug!("Algo heartbeat: instance={} status={}", instance_id, status);
+
+            let _ = app_handle.emit("algo-log", serde_json::json!({
+                "instance_id": instance_id,
+                "algo_id": algo_id,
+                "event_type": "HEARTBEAT",
+                "message": format!("Algo heartbeat: {}", status),
+                "timestamp": timestamp,
+            }));
         }
         "algo_error" => {
             let instance_id = val.get("instance_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -492,6 +527,15 @@ async fn route_trade_signal(
                 "message": message,
                 "handler": handler,
                 "traceback": traceback,
+                "timestamp": timestamp,
+            }));
+
+            // Also emit as algo-log for the log panel
+            let _ = app_handle.emit("algo-log", serde_json::json!({
+                "instance_id": instance_id,
+                "algo_id": algo_id,
+                "event_type": "ERROR",
+                "message": message,
                 "timestamp": timestamp,
             }));
         }
