@@ -11,6 +11,7 @@ use crate::zmq_hub;
 /// Handles from a spawned algo process for output monitoring.
 pub struct ProcessHandles {
     pub stderr: std::process::ChildStderr,
+    pub stdout: std::process::ChildStdout,
     pub instance_id: String,
     pub algo_id: String,
 }
@@ -111,13 +112,15 @@ impl ProcessManager {
             .arg("--max-daily-trades")
             .arg(instance.max_daily_trades.to_string())
             .stderr(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to spawn runner.py: {}", e))?;
 
         let pid = child.id();
         let stderr = child.stderr.take()
             .ok_or("Failed to capture stderr from algo process")?;
+        let stdout = child.stdout.take()
+            .ok_or("Failed to capture stdout from algo process")?;
         let algo_id_str = instance.algo_id.to_string();
         log::info!(
             "Spawned algo process: instance={} algo={} pid={} source={}",
@@ -137,6 +140,7 @@ impl ProcessManager {
 
         Ok((pid, ProcessHandles {
             stderr,
+            stdout,
             instance_id: instance_id.to_string(),
             algo_id: algo_id_str,
         }))

@@ -156,6 +156,12 @@ pub fn start_algo_instance(
     let (pid, handles) = proc_state.0.start_instance(&db_state, &instance_id)?;
     log::info!("start_algo_instance: spawned instance_id={} pid={}", instance_id, pid);
 
+    // Clone IDs before moving into threads
+    let stderr_instance_id = handles.instance_id.clone();
+    let stderr_algo_id = handles.algo_id.clone();
+    let stdout_instance_id = handles.instance_id.clone();
+    let stdout_algo_id = handles.algo_id.clone();
+
     // Monitor stderr in a background thread
     let app = app_handle.clone();
     std::thread::spawn(move || {
@@ -165,7 +171,7 @@ pub fn start_algo_instance(
         for line in reader.lines() {
             match line {
                 Ok(text) if !text.is_empty() => {
-                    log::info!("Algo stderr [{}]: {}", handles.instance_id, text);
+                    log::info!("Algo stderr [{}]: {}", stderr_instance_id, text);
                     last_line = text;
                 }
                 Err(_) => break,
@@ -174,8 +180,8 @@ pub fn start_algo_instance(
         }
         if !last_line.is_empty() {
             let _ = app.emit("algo-error", serde_json::json!({
-                "instance_id": handles.instance_id,
-                "algo_id": handles.algo_id,
+                "instance_id": stderr_instance_id,
+                "algo_id": stderr_algo_id,
                 "severity": "critical",
                 "category": "infrastructure",
                 "message": format!("Process exited: {}", last_line),
@@ -186,6 +192,40 @@ pub fn start_algo_instance(
                     .unwrap_or_default()
                     .as_millis() as i64,
             }));
+        }
+    });
+
+    // Monitor stdout in a background thread — emit algo-log events
+    let app_stdout = app_handle.clone();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(handles.stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(text) if !text.is_empty() => {
+                    let (event_type, message) = if let Some(msg) = text.strip_prefix("[SIGNAL] ") {
+                        ("SIGNAL", msg.to_string())
+                    } else if let Some(msg) = text.strip_prefix("[LOG] ") {
+                        ("LOG", msg.to_string())
+                    } else if text.starts_with("[runner]") || text.starts_with("[risk]") || text.starts_with("[shadow]") {
+                        ("LOG", text.clone())
+                    } else {
+                        ("LOG", text.clone())
+                    };
+                    let _ = app_stdout.emit("algo-log", serde_json::json!({
+                        "instance_id": stdout_instance_id,
+                        "algo_id": stdout_algo_id,
+                        "event_type": event_type,
+                        "message": message,
+                        "timestamp": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64,
+                    }));
+                }
+                Err(_) => break,
+                _ => {}
+            }
         }
     });
 
