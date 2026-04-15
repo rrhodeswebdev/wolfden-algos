@@ -519,9 +519,9 @@ export const AlgosView = ({
                 />
 
               {/* Log Panel */}
-              {selectedInstanceId && logsByInstance[selectedInstanceId] && (
+              {selectedInstanceId && (
                 <LogPanel
-                  logs={logsByInstance[selectedInstanceId]}
+                  logs={logsByInstance[selectedInstanceId] ?? []}
                   health={healthByInstance[selectedInstanceId]}
                   onClear={() => onClearLogs(selectedInstanceId)}
                 />

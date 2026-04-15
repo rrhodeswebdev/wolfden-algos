@@ -250,6 +250,18 @@ pub async fn start(
                                             avg_price,
                                             unrealized_pnl,
                                         });
+
+                                        // Emit algo-log for position updates
+                                        let _ = app_handle.emit("algo-log", serde_json::json!({
+                                            "instance_id": "",
+                                            "algo_id": "",
+                                            "event_type": "POSITION",
+                                            "message": format!("{} {} {} @ {:.2} (uPnL: {:.2})", direction, qty, symbol, avg_price, unrealized_pnl),
+                                            "timestamp": std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_millis() as i64,
+                                        }));
                                     }
                                 }
 
