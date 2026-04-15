@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { type AlgoStats, type DataSource } from "../hooks/useTradingSimulation";
 import { type InstanceErrors, type AlgoError } from "../hooks/useAlgoErrors";
+import { type LogEntry } from "../hooks/useAlgoLogs";
+import { type AlgoHealth } from "../hooks/useAlgoHealth";
+import { LogPanel } from "../components/LogPanel";
 
 type Algo = {
   id: number;
@@ -28,9 +31,12 @@ type AlgosViewProps = {
   activeRuns: AlgoRun[];
   algoStats: Record<string, AlgoStats>;
   errorsByInstance: Record<string, InstanceErrors>;
+  logsByInstance: Record<string, LogEntry[]>;
+  healthByInstance: Record<string, AlgoHealth>;
   onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
   onStopAlgo: (instanceId: string) => void;
   onClearErrors: (instanceId: string) => void;
+  onClearLogs: (instanceId: string) => void;
   onOpenAiTerminal?: (algoId: number) => void;
   aiTerminalAlgoIds?: Set<number>;
 };
@@ -283,6 +289,8 @@ const RunningInstanceRow = ({
   run,
   stats,
   instanceErrors,
+  isSelectedForLogs,
+  onSelectForLogs,
   onStopAlgo,
   onOpenAiTerminal,
   hasActiveTerminal,
@@ -291,6 +299,8 @@ const RunningInstanceRow = ({
   run: AlgoRun;
   stats: AlgoStats | undefined;
   instanceErrors: InstanceErrors | undefined;
+  isSelectedForLogs: boolean;
+  onSelectForLogs: () => void;
   onStopAlgo: (instanceId: string) => void;
   onOpenAiTerminal?: (algoId: number) => void;
   hasActiveTerminal: boolean;
@@ -299,8 +309,8 @@ const RunningInstanceRow = ({
   const hasErrors = instanceErrors && (instanceErrors.errorCount > 0 || instanceErrors.warningCount > 0);
 
   return (
-    <div>
-      <div className="flex items-center justify-between px-6 py-4">
+    <div className={isSelectedForLogs ? "bg-[var(--accent-blue)]/5" : ""}>
+      <div className="flex items-center justify-between px-6 py-4 cursor-pointer" onClick={onSelectForLogs}>
         <div className="flex items-center gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -372,13 +382,29 @@ export const AlgosView = ({
   activeRuns,
   algoStats,
   errorsByInstance,
+  logsByInstance,
+  healthByInstance,
   onStartAlgo,
   onStopAlgo,
   onClearErrors: _onClearErrors,
+  onClearLogs,
   onOpenAiTerminal,
   aiTerminalAlgoIds,
 }: AlgosViewProps) => {
   const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
+  const [hasAutoSelected, setHasAutoSelected] = useState(false);
+
+  // Auto-select first running algo on mount
+  useEffect(() => {
+    if (hasAutoSelected) return;
+    const firstRunning = activeRuns.find((r) => r.status === "running");
+    if (firstRunning) {
+      setSelectedChartId(firstRunning.data_source_id);
+      setSelectedInstanceId(firstRunning.instance_id);
+      setHasAutoSelected(true);
+    }
+  }, [activeRuns, hasAutoSelected]);
 
   const selectedDs = dataSources.find((ds) => ds.id === selectedChartId) ?? null;
   const chartRuns = selectedChartId
@@ -471,6 +497,8 @@ export const AlgosView = ({
                         run={run}
                         stats={algoStats[run.instance_id]}
                         instanceErrors={errorsByInstance[run.instance_id]}
+                        isSelectedForLogs={selectedInstanceId === run.instance_id}
+                        onSelectForLogs={() => setSelectedInstanceId(run.instance_id)}
                         onStopAlgo={onStopAlgo}
                         onOpenAiTerminal={onOpenAiTerminal}
                         hasActiveTerminal={aiTerminalAlgoIds?.has(algo.id) ?? false}
@@ -489,6 +517,15 @@ export const AlgosView = ({
                   onOpenAiTerminal={onOpenAiTerminal}
                   aiTerminalAlgoIds={aiTerminalAlgoIds}
                 />
+
+              {/* Log Panel */}
+              {selectedInstanceId && logsByInstance[selectedInstanceId] && (
+                <LogPanel
+                  logs={logsByInstance[selectedInstanceId]}
+                  health={healthByInstance[selectedInstanceId]}
+                  onClear={() => onClearLogs(selectedInstanceId)}
+                />
+              )}
             </div>
           </>
         ) : (
