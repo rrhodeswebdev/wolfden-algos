@@ -39,6 +39,8 @@ def create_algo(
             "cvd_swing_lows": (),
             "volumes": (),
             "closes": (),
+            "bar_highs": (),
+            "bar_lows": (),
             "stop_price": 0.0,
             "target_price": 0.0,
             "ticks_in_trade": 0,
@@ -46,6 +48,10 @@ def create_algo(
             "daily_pnl": 0.0,
             "daily_halted": False,
             "last_price": 0.0,
+            "rsi_avg_gain": 0.0,
+            "rsi_avg_loss": 0.0,
+            "rsi_seeded": False,
+            "prev_close": 0.0,
         }
 
     def _classify_trade(price, last_price):
@@ -55,38 +61,64 @@ def create_algo(
             return -1
         return 0
 
-    def _compute_rsi(closes):
+    def _compute_rsi_incremental(state, closes, new_close):
+        """Incremental RSI using Wilder's smoothing."""
+        if state["rsi_seeded"]:
+            diff = new_close - state["prev_close"]
+            gain = max(diff, 0.0)
+            loss = max(-diff, 0.0)
+            avg_gain = (state["rsi_avg_gain"] * (rsi_period - 1) + gain) / rsi_period
+            avg_loss = (state["rsi_avg_loss"] * (rsi_period - 1) + loss) / rsi_period
+            if avg_loss == 0:
+                rsi = 100.0
+            else:
+                rs = avg_gain / avg_loss
+                rsi = 100.0 - (100.0 / (1.0 + rs))
+            return rsi, avg_gain, avg_loss, True
+        # Not yet seeded — need rsi_period + 1 closes to seed
         if len(closes) < rsi_period + 1:
-            return 50.0
-        gains = []
-        losses = []
-        for i in range(1, len(closes)):
+            return 50.0, 0.0, 0.0, False
+        # Seed from initial window
+        total_gain = 0.0
+        total_loss = 0.0
+        for i in range(1, rsi_period + 1):
             diff = closes[i] - closes[i - 1]
-            gains.append(max(diff, 0.0))
-            losses.append(max(-diff, 0.0))
-        if len(gains) < rsi_period:
-            return 50.0
-        avg_gain = sum(gains[-rsi_period:]) / rsi_period
-        avg_loss = sum(losses[-rsi_period:]) / rsi_period
+            total_gain += max(diff, 0.0)
+            total_loss += max(-diff, 0.0)
+        avg_gain = total_gain / rsi_period
+        avg_loss = total_loss / rsi_period
+        # Apply Wilder's smoothing for remaining closes
+        for i in range(rsi_period + 1, len(closes)):
+            diff = closes[i] - closes[i - 1]
+            avg_gain = (avg_gain * (rsi_period - 1) + max(diff, 0.0)) / rsi_period
+            avg_loss = (avg_loss * (rsi_period - 1) + max(-diff, 0.0)) / rsi_period
         if avg_loss == 0:
-            return 100.0
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+        return rsi, avg_gain, avg_loss, True
 
-    def _find_swing_highs(prices, lookback):
-        swings = ()
-        for i in range(lookback, len(prices) - lookback):
-            window = prices[i - lookback : i + lookback + 1]
-            if prices[i] == max(window) and prices[i] > prices[i - 1]:
-                swings = (*swings, (i, prices[i]))
+    def _check_new_swing_high(values, swings, lookback):
+        """Check if the bar at -(lookback+1) is a swing high."""
+        n = len(values)
+        i = n - lookback - 1
+        if i < lookback:
+            return swings
+        window = values[i - lookback : i + lookback + 1]
+        if values[i] == max(window) and values[i] > values[i - 1]:
+            return (*swings, (i, values[i]))
         return swings
 
-    def _find_swing_lows(prices, lookback):
-        swings = ()
-        for i in range(lookback, len(prices) - lookback):
-            window = prices[i - lookback : i + lookback + 1]
-            if prices[i] == min(window) and prices[i] < prices[i - 1]:
-                swings = (*swings, (i, prices[i]))
+    def _check_new_swing_low(values, swings, lookback):
+        """Check if the bar at -(lookback+1) is a swing low."""
+        n = len(values)
+        i = n - lookback - 1
+        if i < lookback:
+            return swings
+        window = values[i - lookback : i + lookback + 1]
+        if values[i] == min(window) and values[i] < values[i - 1]:
+            return (*swings, (i, values[i]))
         return swings
 
     def _detect_bearish_divergence(price_highs, cvd_highs):
@@ -191,32 +223,43 @@ def create_algo(
         closes = (*state["closes"], bar.c)[-(rsi_period + 5):]
         volumes = (*state["volumes"], bar.v)[-(volume_avg_period + 2):]
 
-        bar_delta = (bar.c - bar.o) / max(bar.h - bar.l, 0.01) * bar.v
-        cvd = state["cvd"] + bar_delta
+        # Fix 3: Maintain bar_highs and bar_lows incrementally
+        bar_highs = (*state["bar_highs"], bar.h)[-(swing_lookback * 6):]
+        bar_lows = (*state["bar_lows"], bar.l)[-(swing_lookback * 6):]
+
+        # Fix 1: Use tick-accumulated CVD only (no bar_delta added)
+        cvd = state["cvd"]
         cvd_history = (*state["cvd_history"], cvd)[-(swing_lookback * 6):]
 
-        bar_highs = tuple(b.h for b in bars)
-        bar_lows = tuple(b.l for b in bars)
+        # Fix 2: Incremental swing detection — only check the one new candidate
+        price_swing_highs = _check_new_swing_high(
+            bar_highs, state["price_swing_highs"], swing_lookback)
+        price_swing_lows = _check_new_swing_low(
+            bar_lows, state["price_swing_lows"], swing_lookback)
+        cvd_swing_highs = _check_new_swing_high(
+            cvd_history, state["cvd_swing_highs"], swing_lookback)
+        cvd_swing_lows = _check_new_swing_low(
+            cvd_history, state["cvd_swing_lows"], swing_lookback)
 
-        price_swing_highs = _find_swing_highs(bar_highs, swing_lookback)
-        price_swing_lows = _find_swing_lows(bar_lows, swing_lookback)
-        cvd_swing_highs = _find_swing_highs(cvd_history, swing_lookback)
-        cvd_swing_lows = _find_swing_lows(cvd_history, swing_lookback)
+        # Fix 4: Incremental RSI via Wilder's smoothing
+        rsi_val, avg_gain, avg_loss, seeded = _compute_rsi_incremental(
+            state, closes, bar.c)
 
         new_state = {**state, "bars": bars, "closes": closes, "volumes": volumes,
                      "cvd": cvd, "cvd_history": cvd_history,
+                     "bar_highs": bar_highs, "bar_lows": bar_lows,
                      "price_swing_highs": price_swing_highs,
                      "price_swing_lows": price_swing_lows,
                      "cvd_swing_highs": cvd_swing_highs,
-                     "cvd_swing_lows": cvd_swing_lows}
+                     "cvd_swing_lows": cvd_swing_lows,
+                     "rsi_avg_gain": avg_gain, "rsi_avg_loss": avg_loss,
+                     "rsi_seeded": seeded, "prev_close": bar.c}
 
         if state["daily_halted"] or ctx.position != 0:
             return AlgoResult(new_state, ())
 
         if state["ticks_since_last_trade"] < cooldown_ticks:
             return AlgoResult(new_state, ())
-
-        rsi_val = _compute_rsi(closes)
 
         avg_vol = sum(volumes) / len(volumes) if volumes else 0
         if avg_vol > 0 and bar.v < avg_vol:
@@ -225,7 +268,7 @@ def create_algo(
         # Bearish divergence -> short
         bearish, bear_strength = _detect_bearish_divergence(price_swing_highs, cvd_swing_highs)
         if bearish and bear_strength >= divergence_threshold and rsi_val >= rsi_overbought:
-            swing_high = max(b.h for b in bars[-swing_lookback * 3:]) if bars else bar.h
+            swing_high = max(bar_highs[-swing_lookback * 3:]) if bar_highs else bar.h
             stop_dist = abs(swing_high - bar.c) + stop_beyond_swing
             target_dist = max(stop_dist * min_reward_risk, 4.0)
 
@@ -237,7 +280,7 @@ def create_algo(
         # Bullish divergence -> long
         bullish, bull_strength = _detect_bullish_divergence(price_swing_lows, cvd_swing_lows)
         if bullish and bull_strength >= divergence_threshold and rsi_val <= rsi_oversold:
-            swing_low = min(b.l for b in bars[-swing_lookback * 3:]) if bars else bar.l
+            swing_low = min(bar_lows[-swing_lookback * 3:]) if bar_lows else bar.l
             stop_dist = abs(bar.c - swing_low) + stop_beyond_swing
             target_dist = max(stop_dist * min_reward_risk, 4.0)
 
