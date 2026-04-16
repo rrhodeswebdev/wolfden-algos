@@ -2,3 +2,6 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Downloaded standalone Python (built via scripts/download-python.sh)
+/python/
