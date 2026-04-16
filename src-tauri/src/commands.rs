@@ -130,6 +130,11 @@ pub fn start_algo_instance(
 ) -> Result<(), String> {
     log::info!("start_algo_instance: received request for instance_id={}", instance_id);
 
+    // Guard: ensure venv is healthy before attempting to start
+    if !venv_state.0.is_venv_healthy() {
+        return Err("Python environment is not set up. Please wait for setup to complete or check Settings.".to_string());
+    }
+
     // Install per-algo deps if needed before spawning.
     // Read DB state first, then drop the lock before running pip install
     // (which spawns a synchronous subprocess and can block for a long time).

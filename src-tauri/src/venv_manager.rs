@@ -21,20 +21,48 @@ impl VenvManager {
     pub fn new(app_data_dir: &Path, resource_dir: Option<PathBuf>) -> Self {
         let venv_dir = app_data_dir.join("venv");
 
-        // Find requirements.base.txt using same search strategy as runner.py
-        let candidates = [
-            PathBuf::from("algo_runtime/requirements.base.txt"),
-            PathBuf::from("../algo_runtime/requirements.base.txt"),
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("algo_runtime/requirements.base.txt")))
-                .unwrap_or_default(),
-        ];
-        let base_requirements = candidates
-            .iter()
-            .find(|c| c.exists())
-            .cloned()
-            .unwrap_or_else(|| PathBuf::from("algo_runtime/requirements.base.txt"));
+        // Build the search list for requirements.base.txt. Order matters:
+        // installed-app locations (resource_dir) come first because in production
+        // the CWD-relative paths will silently miss and we need the bundled copy.
+        //
+        // The bundle config in tauri.conf.json declares "../algo_runtime/**/*"
+        // as resources. Because that path begins with "..", Tauri v2 mangles the
+        // upward traversal into an "_up_" segment under the resource directory,
+        // so the file lands at <resource_dir>/_up_/algo_runtime/requirements.base.txt.
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(res_dir) = resource_dir.as_ref() {
+            candidates.push(res_dir.join("_up_").join("algo_runtime").join("requirements.base.txt"));
+            // Defensive fallback in case Tauri ever changes the mangling rule.
+            candidates.push(res_dir.join("algo_runtime").join("requirements.base.txt"));
+        }
+        // Dev-mode fallbacks (running `cargo tauri dev` from the repo).
+        candidates.push(PathBuf::from("algo_runtime/requirements.base.txt"));
+        candidates.push(PathBuf::from("../algo_runtime/requirements.base.txt"));
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("algo_runtime/requirements.base.txt"));
+            }
+        }
+
+        let base_requirements = match candidates.iter().find(|c| c.exists()) {
+            Some(found) => {
+                log::info!("Found requirements.base.txt at {:?}", found);
+                found.clone()
+            }
+            None => {
+                log::error!(
+                    "requirements.base.txt not found. Searched: {:?}",
+                    candidates
+                );
+                // Keep the first candidate so the later error message points at
+                // the most-likely-correct path (the installed-app location when
+                // resource_dir is available).
+                candidates
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| PathBuf::from("algo_runtime/requirements.base.txt"))
+            }
+        };
 
         VenvManager {
             venv_dir,
