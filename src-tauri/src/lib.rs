@@ -54,8 +54,9 @@ pub fn run() {
 
             log::info!("Wolf Den initialized. Database at {:?}", db_path);
 
-            // Initialize venv manager
-            let venv_mgr = venv_manager::VenvManager::new(&data_dir);
+            // Initialize venv manager with resource dir for embedded Python lookup
+            let resource_dir = app.path().resource_dir().ok();
+            let venv_mgr = venv_manager::VenvManager::new(&data_dir, resource_dir);
             let venv_python = venv_mgr.python_path();
             app.manage(VenvState(venv_mgr));
 

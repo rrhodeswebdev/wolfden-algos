@@ -13,10 +13,12 @@ pub struct VenvManager {
     venv_dir: PathBuf,
     /// Path to algo_runtime/requirements.base.txt
     base_requirements: PathBuf,
+    /// Optional path to the app's resource directory (for finding embedded Python)
+    resource_dir: Option<PathBuf>,
 }
 
 impl VenvManager {
-    pub fn new(app_data_dir: &Path) -> Self {
+    pub fn new(app_data_dir: &Path, resource_dir: Option<PathBuf>) -> Self {
         let venv_dir = app_data_dir.join("venv");
 
         // Find requirements.base.txt using same search strategy as runner.py
@@ -37,6 +39,7 @@ impl VenvManager {
         VenvManager {
             venv_dir,
             base_requirements,
+            resource_dir,
         }
     }
 
@@ -58,40 +61,85 @@ impl VenvManager {
         }
     }
 
+    /// Looks for an embedded standalone Python bundled in the app's resources.
+    /// Returns the path to the embedded python executable if found and valid.
+    fn find_embedded_python(resource_dir: &Option<PathBuf>) -> Option<PathBuf> {
+        let res_dir = resource_dir.as_ref()?;
+
+        let python_exe = if cfg!(windows) {
+            res_dir.join("python").join("python.exe")
+        } else {
+            res_dir.join("python").join("bin").join("python3")
+        };
+
+        if !python_exe.exists() {
+            log::debug!("Embedded Python not found at {:?}", python_exe);
+            return None;
+        }
+
+        // Validate it works
+        match Command::new(&python_exe).arg("--version").output() {
+            Ok(output) if output.status.success() => {
+                let version = String::from_utf8_lossy(&output.stdout);
+                log::info!("Found embedded Python: {}", version.trim());
+                Some(python_exe)
+            }
+            _ => {
+                log::warn!("Embedded Python at {:?} exists but failed to run", python_exe);
+                None
+            }
+        }
+    }
+
+    /// Finds the best available Python: embedded first, then system.
+    /// Returns the path to python or an error message.
+    pub fn find_python(resource_dir: &Option<PathBuf>) -> Result<PathBuf, String> {
+        // Try embedded Python first
+        if let Some(embedded) = Self::find_embedded_python(resource_dir) {
+            return Ok(embedded);
+        }
+
+        // Fall back to system Python
+        Self::find_system_python()
+    }
+
     /// Finds system python3 and validates version >= 3.9.
     /// Returns the path to python3 or an error message.
     pub fn find_system_python() -> Result<PathBuf, String> {
-        let output = Command::new("python3")
-            .arg("--version")
-            .output()
-            .map_err(|e| format!(
-                "Python 3 not found on your system. Please install Python 3.9 or later.\n\nDetails: {}",
-                e
-            ))?;
+        // On Windows, try "python" first (more common), then "python3"
+        let candidates: &[&str] = if cfg!(windows) {
+            &["python", "python3"]
+        } else {
+            &["python3", "python"]
+        };
 
-        if !output.status.success() {
-            return Err("python3 --version failed. Please ensure Python 3 is installed correctly.".to_string());
+        for cmd in candidates {
+            if let Ok(output) = Command::new(cmd).arg("--version").output() {
+                if !output.status.success() {
+                    continue;
+                }
+
+                let version_str = String::from_utf8_lossy(&output.stdout);
+                let version = version_str.trim().strip_prefix("Python ").unwrap_or("");
+                let parts: Vec<&str> = version.split('.').collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+
+                let major: u32 = parts[0].parse().unwrap_or(0);
+                let minor: u32 = parts[1].parse().unwrap_or(0);
+
+                if major >= 3 && minor >= 9 {
+                    return Ok(PathBuf::from(cmd));
+                }
+            }
         }
 
-        let version_str = String::from_utf8_lossy(&output.stdout);
-        // Parse "Python 3.X.Y"
-        let version = version_str.trim().strip_prefix("Python ").unwrap_or("");
-        let parts: Vec<&str> = version.split('.').collect();
-        if parts.len() < 2 {
-            return Err(format!("Could not parse Python version from: {}", version_str.trim()));
-        }
-
-        let major: u32 = parts[0].parse().unwrap_or(0);
-        let minor: u32 = parts[1].parse().unwrap_or(0);
-
-        if major < 3 || (major == 3 && minor < 9) {
-            return Err(format!(
-                "Python {}.{} found, but Wolf Den requires Python 3.9 or later.\n\nPlease upgrade your Python installation.",
-                major, minor
-            ));
-        }
-
-        Ok(PathBuf::from("python3"))
+        Err(
+            "Python 3.9+ not found. Wolf Den includes an embedded Python for Windows builds, \
+             but it was not found. Please install Python 3.9 or later."
+                .to_string(),
+        )
     }
 
     /// Returns true if the venv exists and has a valid Python binary.
@@ -122,9 +170,9 @@ impl VenvManager {
         major >= 3 && minor >= 9
     }
 
-    /// Creates the venv using system python3.
+    /// Creates the venv using the best available Python (embedded or system).
     pub fn create_venv(&self) -> Result<(), String> {
-        let system_python = Self::find_system_python()?;
+        let system_python = Self::find_python(&self.resource_dir)?;
 
         // Delete corrupted venv if it exists
         if self.venv_dir.exists() {
