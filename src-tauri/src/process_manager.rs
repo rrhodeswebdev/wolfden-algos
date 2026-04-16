@@ -150,6 +150,8 @@ impl ProcessManager {
             .arg(instance.max_daily_loss.to_string())
             .arg("--max-daily-trades")
             .arg(instance.max_daily_trades.to_string())
+            .arg("--allowed-dir")
+            .arg(self.algo_dir.to_str().unwrap_or(""))
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
