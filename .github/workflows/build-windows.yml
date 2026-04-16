@@ -1,0 +1,74 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Download standalone Python
+        shell: pwsh
+        run: |
+          $PYTHON_VERSION = "3.12.8"
+          $RELEASE_TAG = "20250106"
+          $ARCHIVE_NAME = "cpython-${PYTHON_VERSION}+${RELEASE_TAG}-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+          $DOWNLOAD_URL = "https://github.com/indygreg/python-build-standalone/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME}"
+          $TARGET_DIR = "src-tauri/python"
+
+          New-Item -ItemType Directory -Force -Path $TARGET_DIR | Out-Null
+          $ARCHIVE_PATH = Join-Path $TARGET_DIR $ARCHIVE_NAME
+
+          Write-Host "Downloading standalone Python ${PYTHON_VERSION}..."
+          Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $ARCHIVE_PATH
+
+          Write-Host "Extracting..."
+          tar -xzf $ARCHIVE_PATH -C $TARGET_DIR
+
+          # Move contents up from nested python/ directory
+          $INNER = Join-Path $TARGET_DIR "python"
+          if (Test-Path $INNER) {
+              Get-ChildItem -Path $INNER | Move-Item -Destination $TARGET_DIR -Force
+              Remove-Item -Recurse -Force $INNER
+          }
+
+          Remove-Item -Force $ARCHIVE_PATH
+
+          # Verify
+          $PYTHON_EXE = Join-Path $TARGET_DIR "python.exe"
+          & $PYTHON_EXE --version
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolf-den-windows-installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 30
