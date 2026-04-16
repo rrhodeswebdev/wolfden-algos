@@ -190,17 +190,28 @@ impl VenvManager {
             };
         }
 
-        // Split deps string into individual requirements
-        let dep_list: Vec<&str> = deps
-            .lines()
-            .flat_map(|line| line.split_whitespace())
-            .filter(|s| !s.is_empty())
-            .collect();
+        // Split deps string into individual requirements, rejecting any tokens
+        // that look like pip flags to prevent flag injection attacks.
+        let mut dep_list: Vec<&str> = Vec::new();
+        for token in deps.lines().flat_map(|line| line.split_whitespace()).filter(|s| !s.is_empty()) {
+            if token.starts_with('-') {
+                log::warn!("Rejecting suspicious dependency token (looks like a flag): {:?}", token);
+                continue;
+            }
+            // Basic validation: must start with a letter or digit (valid package specifier)
+            if let Some(first) = token.chars().next() {
+                if !first.is_alphanumeric() {
+                    log::warn!("Rejecting invalid dependency token: {:?}", token);
+                    continue;
+                }
+            }
+            dep_list.push(token);
+        }
 
         if dep_list.is_empty() {
             return PipResult {
                 success: true,
-                output: "No dependencies to install.".to_string(),
+                output: "No valid dependencies to install (all tokens were rejected).".to_string(),
             };
         }
 

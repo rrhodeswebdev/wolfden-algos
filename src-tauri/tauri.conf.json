@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' ws://127.0.0.1:9000; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {

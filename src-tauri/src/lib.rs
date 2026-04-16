@@ -96,7 +96,11 @@ pub fn run() {
             let ws_history = history_store.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = websocket_server::start(port, ws_inbound_tx, ws_registry, ws_tracker, ws_history, handle).await {
-                    log::error!("WebSocket server error: {}", e);
+                    log::error!(
+                        "FATAL: WebSocket server failed to start on port {}. \
+                         NinjaTrader connections will not work. Error: {}",
+                        port, e
+                    );
                 }
             });
 
@@ -203,23 +207,25 @@ pub fn run() {
                 }
             });
 
-            // Health emitter — periodic algo-health events for the frontend log panel
+            // Health emitter — periodic algo-health events for the frontend log panel.
+            // Open the DB connection once and reuse it across iterations.
             let health_handle = app.handle().clone();
             let health_registry = registry.clone();
             let health_db_path = db_path.clone();
             tauri::async_runtime::spawn(async move {
+                let conn = match rusqlite::Connection::open(&health_db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::error!("DB open for health emitter failed: {}", e);
+                        return;
+                    }
+                };
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
                 loop {
                     interval.tick().await;
-                    let instances = {
-                        let conn = match rusqlite::Connection::open(&health_db_path) {
-                            Ok(c) => c,
-                            Err(_) => continue,
-                        };
-                        match db::get_algo_instances(&conn, None) {
-                            Ok(list) => list.into_iter().filter(|i| i.status == "running").collect::<Vec<_>>(),
-                            Err(_) => continue,
-                        }
+                    let instances = match db::get_algo_instances(&conn, None) {
+                        Ok(list) => list.into_iter().filter(|i| i.status == "running").collect::<Vec<_>>(),
+                        Err(_) => continue,
                     };
 
                     let reg = health_registry.read().await;
@@ -284,18 +290,21 @@ pub fn run() {
                     ai_state.0.close_all();
                 }
 
-                // 3. Send Flatten to every connected NinjaTrader chart
+                // 3. Send Flatten to every connected NinjaTrader chart.
+                // Run block_on in a separate thread to avoid deadlocking if we are
+                // already on the Tokio runtime thread.
                 if let Some(ws_state) = app.try_state::<WsState>() {
                     let registry = ws_state.registry.clone();
-                    // Use block_on since we're in a sync callback
-                    tauri::async_runtime::block_on(async {
-                        let reg = registry.read().await;
-                        for sender in reg.all_senders() {
-                            if let Err(e) = sender.send(types::NtOutbound::Flatten).await {
-                                log::warn!("Failed to send Flatten: {}", e);
+                    let _ = std::thread::spawn(move || {
+                        tauri::async_runtime::block_on(async {
+                            let reg = registry.read().await;
+                            for sender in reg.all_senders() {
+                                if let Err(e) = sender.send(types::NtOutbound::Flatten).await {
+                                    log::warn!("Failed to send Flatten: {}", e);
+                                }
                             }
-                        }
-                    });
+                        });
+                    }).join();
                 }
 
                 log::info!("Shutdown cleanup complete");

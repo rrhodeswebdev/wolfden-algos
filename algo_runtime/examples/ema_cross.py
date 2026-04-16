@@ -72,22 +72,26 @@ def create_algo(
         if len(prices) < slow_period:
             return AlgoResult(new_state, ())
 
-        # Compute EMAs
-        fast_ema = sum(prices[-fast_period:]) / fast_period
-        for p in prices[-fast_period:]:
+        # Compute EMAs — seed with first price, then apply EMA over remaining
+        fast_window = prices[-fast_period:]
+        fast_ema = fast_window[0]
+        for p in fast_window[1:]:
             fast_ema = _ema_step(fast_ema, p, fast_period)
 
-        slow_ema = sum(prices[-slow_period:]) / slow_period
-        for p in prices[-slow_period:]:
+        slow_window = prices[-slow_period:]
+        slow_ema = slow_window[0]
+        for p in slow_window[1:]:
             slow_ema = _ema_step(slow_ema, p, slow_period)
 
         prev_prices = prices[:-1]
         if len(prev_prices) >= slow_period:
-            prev_fast = sum(prev_prices[-fast_period:]) / fast_period
-            for p in prev_prices[-fast_period:]:
+            prev_fast_window = prev_prices[-fast_period:]
+            prev_fast = prev_fast_window[0]
+            for p in prev_fast_window[1:]:
                 prev_fast = _ema_step(prev_fast, p, fast_period)
-            prev_slow = sum(prev_prices[-slow_period:]) / slow_period
-            for p in prev_prices[-slow_period:]:
+            prev_slow_window = prev_prices[-slow_period:]
+            prev_slow = prev_slow_window[0]
+            for p in prev_slow_window[1:]:
                 prev_slow = _ema_step(prev_slow, p, slow_period)
         else:
             return AlgoResult(new_state, ())

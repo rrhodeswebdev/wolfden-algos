@@ -1,6 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-
-type View = "home" | "editor" | "algos" | "trading";
+import type { View } from "../types";
 
 type SidebarProps = {
   activeView: View;

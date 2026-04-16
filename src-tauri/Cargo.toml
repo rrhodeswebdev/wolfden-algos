@@ -56,3 +56,7 @@ notify = "7"
 
 # Hashing for dependency change detection
 sha2 = "0.10"
+
+# Unix signal handling for graceful process shutdown
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

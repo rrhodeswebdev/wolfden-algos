@@ -8,6 +8,44 @@ use std::sync::Mutex;
 use crate::db::{self, DbState};
 use crate::zmq_hub;
 
+/// Gracefully terminate a child process: send SIGTERM first, wait up to 2 seconds,
+/// then SIGKILL if still alive. On non-Unix platforms, falls back to immediate kill.
+fn graceful_kill(child: &mut Child) {
+    #[cfg(unix)]
+    let pid = child.id();
+
+    #[cfg(unix)]
+    {
+        // Send SIGTERM for graceful shutdown
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+        // Poll for up to 2 seconds
+        for _ in 0..20 {
+            match child.try_wait() {
+                Ok(Some(_)) => return, // Process exited
+                Ok(None) => {}         // Still running
+                Err(_) => {
+                    child.kill().ok();
+                    child.wait().ok();
+                    return;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // Still alive after 2 seconds — force kill
+        log::warn!("Process pid={} did not exit after SIGTERM, sending SIGKILL", pid);
+        child.kill().ok();
+        child.wait().ok();
+    }
+
+    #[cfg(not(unix))]
+    {
+        child.kill().ok();
+        child.wait().ok();
+    }
+}
+
 /// Handles from a spawned algo process for output monitoring.
 pub struct ProcessHandles {
     pub stderr: std::process::ChildStderr,
@@ -43,15 +81,16 @@ impl ProcessManager {
     }
 
     fn find_runner() -> PathBuf {
-        // In dev: relative to the project root
+        // Try exe-relative path first (most reliable in production), then CWD-based fallbacks for dev
         let candidates = [
-            PathBuf::from("algo_runtime/runner.py"),
-            PathBuf::from("../algo_runtime/runner.py"),
-            // Relative to executable for release builds
+            // Relative to executable for release builds — tried first for reliability
             std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.join("algo_runtime/runner.py")))
                 .unwrap_or_default(),
+            // In dev: relative to the CWD
+            PathBuf::from("algo_runtime/runner.py"),
+            PathBuf::from("../algo_runtime/runner.py"),
         ];
         for c in &candidates {
             if c.exists() {
@@ -147,6 +186,7 @@ impl ProcessManager {
     }
 
     /// Stops all running algo processes and marks them as stopped in the DB.
+    /// Lock order: processes first, then DB.
     pub fn stop_all(&self, db_state: &DbState) {
         let mut procs = match self.processes.lock() {
             Ok(p) => p,
@@ -162,29 +202,34 @@ impl ProcessManager {
                 log::error!("Failed to lock DB for stop_all: {}", e);
                 // Still kill processes even if DB update fails
                 for (id, mut child) in procs.drain() {
-                    log::info!("Killing algo process: instance={} pid={}", id, child.id());
-                    child.kill().ok();
-                    child.wait().ok();
+                    log::info!("Stopping algo process: instance={} pid={}", id, child.id());
+                    graceful_kill(&mut child);
                 }
                 return;
             }
         };
 
         for (id, mut child) in procs.drain() {
-            log::info!("Killing algo process: instance={} pid={}", id, child.id());
-            child.kill().ok();
-            child.wait().ok();
+            log::info!("Stopping algo process: instance={} pid={}", id, child.id());
+            graceful_kill(&mut child);
             db::update_algo_instance_status(&conn, &id, "stopped", None).ok();
         }
     }
 
     /// Stops all running algo processes for a given data source.
     /// Called when a NinjaTrader chart disconnects.
+    /// Lock order: processes first, then DB.
     pub fn stop_instances_for_source(
         &self,
         db_state: &DbState,
         data_source_id: &str,
     ) -> Vec<String> {
+        // Acquire process lock first to maintain consistent lock ordering
+        let mut procs = match self.processes.lock() {
+            Ok(p) => p,
+            Err(_) => return vec![],
+        };
+
         let conn = match db_state.0.lock() {
             Ok(c) => c,
             Err(e) => {
@@ -203,16 +248,10 @@ impl ProcessManager {
         };
 
         let mut stopped = vec![];
-        let mut procs = match self.processes.lock() {
-            Ok(p) => p,
-            Err(_) => return vec![],
-        };
-
         for inst in instances.iter().filter(|i| i.status == "running") {
             if let Some(mut child) = procs.remove(&inst.id) {
-                log::info!("Killing algo (chart disconnected): instance={} pid={}", inst.id, child.id());
-                child.kill().ok();
-                child.wait().ok();
+                log::info!("Stopping algo (chart disconnected): instance={} pid={}", inst.id, child.id());
+                graceful_kill(&mut child);
             }
             db::update_algo_instance_status(&conn, &inst.id, "stopped", None).ok();
             stopped.push(inst.id.clone());
@@ -222,6 +261,7 @@ impl ProcessManager {
     }
 
     /// Stops a running algo process by instance_id.
+    /// Lock order: processes first, then DB.
     pub fn stop_instance(
         &self,
         db_state: &DbState,
@@ -230,9 +270,8 @@ impl ProcessManager {
         let mut procs = self.processes.lock().map_err(|e| e.to_string())?;
 
         if let Some(mut child) = procs.remove(instance_id) {
-            log::info!("Killing algo process: instance={} pid={}", instance_id, child.id());
-            child.kill().ok();
-            child.wait().ok();
+            log::info!("Stopping algo process: instance={} pid={}", instance_id, child.id());
+            graceful_kill(&mut child);
         } else {
             log::warn!("No running process found for instance {}", instance_id);
         }

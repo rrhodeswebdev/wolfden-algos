@@ -1,10 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-
-type Algo = {
-  id: number;
-  name: string;
-};
+import type { Algo, AlgoRun } from "../types";
 
 export type DataSource = {
   id: string;           // "ES 09-26:5min"
@@ -24,15 +20,6 @@ export type AlgoInstance = {
   max_daily_loss: number;
   max_daily_trades: number;
   stop_loss_ticks: number | null;
-};
-
-type AlgoRun = {
-  algo_id: number;
-  status: string;
-  mode: string;
-  account: string;
-  data_source_id: string;
-  instance_id: string;
 };
 
 export type Position = {
@@ -237,7 +224,10 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
         realizedPnlRef.current = a.realized_pnl;
         // Append to P&L history only when realized P&L changes (trade closure)
         if (a.realized_pnl !== prev) {
-          setPnlHistory((h) => [...h, a.realized_pnl]);
+          setPnlHistory((h) => {
+            const next = [...h, a.realized_pnl];
+            return next.length > 500 ? next.slice(-500) : next;
+          });
         }
       }
     });
@@ -247,7 +237,6 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
   // Listen for position updates from NinjaTrader
   useEffect(() => {
     const unlisten = listen<PositionEvent>("nt-position", (event) => {
-      console.log("[nt-position]", event.payload);
       const p = event.payload;
       const posKey = `${p.source_id}:${p.symbol}`;
 
@@ -258,13 +247,22 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
         const lastPnl = positionPnlRef.current.get(posKey) ?? 0;
         if (lastPnl !== 0) {
           if (isShadow) {
-            setShadowCompletedTrades((prev) => [...prev, { pnl: lastPnl }]);
+            setShadowCompletedTrades((prev) => {
+              const next = [...prev, { pnl: lastPnl }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             const newTotal = Math.round((shadowRealizedPnlRef.current + lastPnl) * 100) / 100;
             setShadowRealizedPnl(newTotal);
             shadowRealizedPnlRef.current = newTotal;
-            setShadowPnlHistory((h) => [...h, newTotal]);
+            setShadowPnlHistory((h) => {
+              const next = [...h, newTotal];
+              return next.length > 500 ? next.slice(-500) : next;
+            });
           } else {
-            setCompletedTrades((prev) => [...prev, { pnl: lastPnl }]);
+            setCompletedTrades((prev) => {
+              const next = [...prev, { pnl: lastPnl }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
           }
         }
         positionPnlRef.current.delete(posKey);
@@ -313,7 +311,6 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
   // Listen for order updates from NinjaTrader
   useEffect(() => {
     const unlisten = listen<OrderEvent>("nt-order-update", (event) => {
-      console.log("[nt-order-update]", event.payload);
       const o = event.payload;
       const status = mapOrderStatus(o.state);
 
@@ -363,7 +360,6 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
   // Listen for backtest results from algo runners
   useEffect(() => {
     const unlisten = listen<BacktestResultEvent>("algo-backtest-result", (event) => {
-      console.log("[algo-backtest-result]", event.payload);
       const r = event.payload;
       if (r.skipped) {
         // Tick-only algo — no backtest available

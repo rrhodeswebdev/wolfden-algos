@@ -1,16 +1,4 @@
-type AlgoRun = {
-  algo_id: number;
-  status: string;
-  mode: string;
-  account: string;
-  data_source_id: string;
-  instance_id: string;
-};
-
-type Algo = {
-  id: number;
-  name: string;
-};
+import type { Algo, AlgoRun } from "../types";
 
 type Position = {
   symbol: string;

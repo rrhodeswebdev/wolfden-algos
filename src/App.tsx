@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { DEFAULT_ALGO } from "./components/AlgoEditor";
@@ -17,28 +17,7 @@ import { useAlgoLogs } from "./hooks/useAlgoLogs";
 import { useAlgoHealth } from "./hooks/useAlgoHealth";
 import type { DataSource } from "./hooks/useTradingSimulation";
 import { VenvSetupModal } from "./components/VenvSetupModal";
-
-type Algo = {
-  id: number;
-  name: string;
-  code: string;
-  config: string | null;
-  dependencies: string;
-  deps_hash: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type AlgoRun = {
-  algo_id: number;
-  status: string;
-  mode: string;
-  account: string;
-  data_source_id: string;
-  instance_id: string;
-};
-
-type View = "home" | "editor" | "algos" | "trading";
+import type { Algo, AlgoRun, View } from "./types";
 
 export const App = () => {
   const [activeView, setActiveView] = useState<View>("home");
@@ -50,6 +29,16 @@ export const App = () => {
   const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
   const [editorDeps, setEditorDeps] = useState("");
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
+
+  const selectedAlgoIdRef = useRef(selectedAlgoId);
+  useEffect(() => {
+    selectedAlgoIdRef.current = selectedAlgoId;
+  }, [selectedAlgoId]);
+
+  const activeRunsRef = useRef(activeRuns);
+  useEffect(() => {
+    activeRunsRef.current = activeRuns;
+  }, [activeRuns]);
 
   const [aiTerminalAlgoIds, setAiTerminalAlgoIds] = useState<Set<number>>(new Set());
   const [venvReady, setVenvReady] = useState<boolean | null>(null);
@@ -151,15 +140,13 @@ export const App = () => {
       setDataSources((prev) => prev.filter((ds) => ds.id !== removedId));
 
       // Stop any algos running on the disconnected chart
-      setActiveRuns((prev) => {
-        const toStop = prev.filter((r) => r.data_source_id === removedId);
-        for (const run of toStop) {
-          invoke("stop_algo_instance", { instanceId: run.instance_id }).catch((e) =>
-            console.error("Failed to stop algo on chart disconnect:", e)
-          );
-        }
-        return prev.filter((r) => r.data_source_id !== removedId);
-      });
+      const toStop = activeRunsRef.current.filter((r) => r.data_source_id === removedId);
+      for (const run of toStop) {
+        invoke("stop_algo_instance", { instanceId: run.instance_id }).catch((e) =>
+          console.error("Failed to stop algo on chart disconnect:", e)
+        );
+      }
+      setActiveRuns((prev) => prev.filter((r) => r.data_source_id !== removedId));
     });
     const u6 = listen<{ algo_id: number; code: string }>("algo-code-updated", (event) => {
       const { algo_id, code } = event.payload;
@@ -167,12 +154,9 @@ export const App = () => {
         prev.map((a) => (a.id === algo_id ? { ...a, code, updated_at: new Date().toISOString() } : a))
       );
       // If the updated algo is currently selected in the editor, update editorCode
-      setSelectedAlgoId((currentId) => {
-        if (currentId === algo_id) {
-          setEditorCode(code);
-        }
-        return currentId;
-      });
+      if (algo_id === selectedAlgoIdRef.current) {
+        setEditorCode(code);
+      }
     });
     return () => {
       u1.then((f) => f());
@@ -331,7 +315,6 @@ export const App = () => {
   }, []);
 
   const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => {
-    console.log("[handleStartAlgo] called:", { id, mode, account, dataSourceId });
     let instanceId: string | null = null;
     try {
       // Create the instance in the DB first
@@ -342,7 +325,6 @@ export const App = () => {
         mode,
       });
       instanceId = instance.id;
-      console.log("[handleStartAlgo] instance created:", instanceId);
 
       // Show "installing" status while deps install + process starts
       setActiveRuns((prev) => [...prev, {
@@ -352,7 +334,6 @@ export const App = () => {
 
       // start_algo_instance now handles dep installation before spawning
       await invoke("start_algo_instance", { instanceId });
-      console.log("[handleStartAlgo] process started, updating to running");
 
       // Update status to running
       setActiveRuns((prev) => prev.map((r) =>
@@ -433,7 +414,6 @@ export const App = () => {
           healthByInstance={healthByInstance}
           onStartAlgo={handleStartAlgo}
           onStopAlgo={handleStopAlgo}
-          onClearErrors={clearErrors}
           onClearLogs={clearLogs}
           onOpenAiTerminal={handleOpenAiTerminal}
           aiTerminalAlgoIds={aiTerminalAlgoIds}

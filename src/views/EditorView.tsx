@@ -1,16 +1,6 @@
 import { AlgoEditor } from "../components/AlgoEditor";
 import { AlgoManager } from "../components/AlgoManager";
-
-type Algo = {
-  id: number;
-  name: string;
-  code: string;
-  config: string | null;
-  dependencies: string;
-  deps_hash: string;
-  created_at: string;
-  updated_at: string;
-};
+import type { Algo } from "../types";
 
 type EditorViewProps = {
   algos: Algo[];

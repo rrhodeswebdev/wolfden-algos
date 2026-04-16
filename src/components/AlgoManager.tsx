@@ -1,16 +1,6 @@
 
 import { useState, useRef, useEffect } from "react";
-
-type Algo = {
-  id: number;
-  name: string;
-  code: string;
-  config: string | null;
-  dependencies: string;
-  deps_hash: string;
-  created_at: string;
-  updated_at: string;
-};
+import type { Algo } from "../types";
 
 type AlgoManagerProps = {
   algos: Algo[];

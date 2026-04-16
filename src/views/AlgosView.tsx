@@ -4,26 +4,7 @@ import { type InstanceErrors, type AlgoError } from "../hooks/useAlgoErrors";
 import { type LogEntry } from "../hooks/useAlgoLogs";
 import { type AlgoHealth } from "../hooks/useAlgoHealth";
 import { LogPanel } from "../components/LogPanel";
-
-type Algo = {
-  id: number;
-  name: string;
-  code: string;
-  config: string | null;
-  dependencies: string;
-  deps_hash: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type AlgoRun = {
-  algo_id: number;
-  status: string;
-  mode: string;
-  account: string;
-  data_source_id: string;
-  instance_id: string;
-};
+import type { Algo, AlgoRun } from "../types";
 
 type AlgosViewProps = {
   algos: Algo[];
@@ -35,7 +16,6 @@ type AlgosViewProps = {
   healthByInstance: Record<string, AlgoHealth>;
   onStartAlgo: (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => void;
   onStopAlgo: (instanceId: string) => void;
-  onClearErrors: (instanceId: string) => void;
   onClearLogs: (instanceId: string) => void;
   onOpenAiTerminal?: (algoId: number) => void;
   aiTerminalAlgoIds?: Set<number>;
@@ -386,7 +366,6 @@ export const AlgosView = ({
   healthByInstance,
   onStartAlgo,
   onStopAlgo,
-  onClearErrors: _onClearErrors,
   onClearLogs,
   onOpenAiTerminal,
   aiTerminalAlgoIds,

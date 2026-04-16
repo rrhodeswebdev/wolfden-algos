@@ -9,6 +9,9 @@ pub struct DbState(pub Mutex<Connection>);
 pub fn initialize(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
 
+    // Enable foreign key enforcement
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
     // Performance pragmas for low-latency trading workloads
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -265,6 +268,10 @@ pub fn update_algo_code(conn: &Connection, id: i64, code: &str) -> Result<()> {
 }
 
 pub fn delete_algo(conn: &Connection, id: i64) -> Result<()> {
+    // Cascade deletes to related tables before removing the algo itself
+    conn.execute("DELETE FROM trades WHERE algo_id = ?1", params![id])?;
+    conn.execute("DELETE FROM algo_runs WHERE algo_id = ?1", params![id])?;
+    conn.execute("DELETE FROM algo_instances WHERE algo_id = ?1", params![id])?;
     conn.execute("DELETE FROM algos WHERE id = ?1", params![id])?;
     Ok(())
 }

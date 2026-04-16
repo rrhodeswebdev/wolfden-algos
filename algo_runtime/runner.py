@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import importlib.util
+import os
 import sys
 import time
 import traceback
@@ -40,9 +41,16 @@ class RiskManager:
         self.max_daily_loss = max_daily_loss
         self.max_daily_trades = max_daily_trades
         self.position = 0
+        self.avg_entry_price = 0.0
         self.daily_pnl = 0.0
         self.daily_trades = 0
         self.halted = False
+
+    def _get_check_order(self, order) -> Order:
+        """Extract the entry Order for risk checking, handling BracketOrder."""
+        if isinstance(order, BracketOrder):
+            return order.entry
+        return order
 
     def check_order(self, order, error_callback=None) -> bool:
         """Returns False if order would violate risk limits."""
@@ -62,7 +70,8 @@ class RiskManager:
             if error_callback:
                 error_callback(severity="warning", category="risk", message=msg)
             return False
-        new_pos = self.position + (order.qty if order.side == "BUY" else -order.qty)
+        check = self._get_check_order(order)
+        new_pos = self.position + (check.qty if check.side == "BUY" else -check.qty)
         if abs(new_pos) > self.max_position:
             msg = f"Order would exceed max position ({self.max_position}) — rejected"
             print(f"[risk] {msg}")
@@ -72,11 +81,37 @@ class RiskManager:
         return True
 
     def on_fill(self, fill: Fill):
-        """Update position and trade count on fill."""
-        if fill.side == "BUY":
-            self.position += fill.qty
+        """Update position, trade count, and daily P&L on fill."""
+        qty_signed = fill.qty if fill.side == "BUY" else -fill.qty
+        old_position = self.position
+        new_position = old_position + qty_signed
+
+        # Compute realized P&L when reducing or closing position
+        if old_position != 0 and self.avg_entry_price > 0:
+            # Determine if this fill reduces the position
+            reducing = (old_position > 0 and qty_signed < 0) or (old_position < 0 and qty_signed > 0)
+            if reducing:
+                qty_closed = min(abs(qty_signed), abs(old_position))
+                direction = 1 if old_position > 0 else -1
+                realized_pnl = qty_closed * (fill.price - self.avg_entry_price) * direction
+                self.daily_pnl += realized_pnl
+
+        # Update average entry price
+        if old_position == 0:
+            # Opening fresh position
+            self.avg_entry_price = fill.price
+        elif (old_position > 0 and qty_signed > 0) or (old_position < 0 and qty_signed < 0):
+            # Adding to existing position — compute weighted average
+            total_qty = abs(old_position) + abs(qty_signed)
+            self.avg_entry_price = (self.avg_entry_price * abs(old_position) + fill.price * abs(qty_signed)) / total_qty
+        elif new_position == 0:
+            # Fully closed
+            self.avg_entry_price = 0.0
         else:
-            self.position -= fill.qty
+            # Flipped sides
+            self.avg_entry_price = fill.price
+
+        self.position = new_position
         self.daily_trades += 1
 
 
@@ -153,6 +188,19 @@ class ShadowSimulator:
         if isinstance(order, CancelOrder):
             self._working.pop(order.order_id, None)
             return []
+
+        # Decompose BracketOrder into component orders
+        if isinstance(order, BracketOrder):
+            fills = []
+            # Submit entry order
+            entry_fills = self.submit(order.entry, symbol, last_price)
+            fills.extend(entry_fills)
+            # Submit stop loss and take profit as working orders
+            if order.stop_loss is not None:
+                self.submit(order.stop_loss, symbol, last_price)
+            if order.take_profit is not None:
+                self.submit(order.take_profit, symbol, last_price)
+            return fills
 
         oid = self._gen_id()
 
@@ -310,6 +358,26 @@ def serialize_orders(instance_id: str, algo_id: str, orders: tuple) -> list[byte
                 "instance_id": instance_id,
                 "order_id": order.order_id,
             }
+        elif isinstance(order, BracketOrder):
+            # Decompose BracketOrder into its constituent orders
+            def _order_msg(o: Order) -> dict:
+                return {
+                    "type": "order",
+                    "instance_id": instance_id,
+                    "algo_id": algo_id,
+                    "side": o.side,
+                    "symbol": o.symbol,
+                    "qty": o.qty,
+                    "order_type": o.order_type,
+                    "limit_price": o.limit_price,
+                    "stop_price": o.stop_price,
+                }
+            messages.append(msgpack.packb(_order_msg(order.entry), use_bin_type=True))
+            if order.stop_loss is not None:
+                messages.append(msgpack.packb(_order_msg(order.stop_loss), use_bin_type=True))
+            if order.take_profit is not None:
+                messages.append(msgpack.packb(_order_msg(order.take_profit), use_bin_type=True))
+            continue
         else:
             msg = {
                 "type": "order",
@@ -340,8 +408,9 @@ def send_error(push_socket, instance_id: str, algo_id: str, severity: str, categ
             "traceback": traceback_str,
             "timestamp": int(time.time() * 1000),
         }, use_bin_type=True))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Failed to send error: {e}", file=sys.stderr)
+        traceback.print_exc()
 
 
 def compute_backtest_stats(trades: list[dict]) -> dict:
@@ -398,7 +467,7 @@ def compute_backtest_stats(trades: list[dict]) -> dict:
     if len(trades) >= 2:
         returns = [t["pnl"] for t in trades]
         mean_r = sum(returns) / len(returns)
-        variance = sum((r - mean_r) ** 2 for r in returns) / len(returns)
+        variance = sum((r - mean_r) ** 2 for r in returns) / (len(returns) - 1)
         std_r = variance ** 0.5
         sharpe = f"{mean_r / std_r:.2f}" if std_r > 0 else "--"
     else:
@@ -837,6 +906,19 @@ def main() -> None:
     parser.add_argument("--max-daily-loss", type=float, default=500.0, help="Max daily loss before halting ($)")
     parser.add_argument("--max-daily-trades", type=int, default=50, help="Max trades per day")
     args = parser.parse_args()
+
+    # C6: Validate --algo-path is within allowed directories
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    algo_real = os.path.realpath(args.algo_path)
+    allowed_prefixes = (
+        os.path.join(script_dir, "algos") + os.sep,
+        os.path.join(script_dir, "examples") + os.sep,
+    )
+    if not algo_real.startswith(allowed_prefixes):
+        print(f"[runner] Error: algo path '{algo_real}' is not within allowed directories "
+              f"({', '.join(allowed_prefixes)})", file=sys.stderr)
+        sys.exit(1)
+
     run(args)
 
 

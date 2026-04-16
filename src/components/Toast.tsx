@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 type ToastMessage = {
   id: number;
@@ -17,19 +17,28 @@ export const toast = {
 
 export const ToastContainer = () => {
   const [messages, setMessages] = useState<ToastMessage[]>([]);
+  const timeoutIds = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   const addToast = useCallback((text: string, type: "error" | "info" = "error") => {
     const id = nextId++;
     setMessages((prev) => [...prev, { id, text, type }]);
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       setMessages((prev) => prev.filter((m) => m.id !== id));
+      timeoutIds.current.delete(timeoutId);
     }, 5000);
+    timeoutIds.current.add(timeoutId);
   }, []);
 
   useEffect(() => {
     addToastGlobal = addToast;
     return () => { addToastGlobal = null; };
   }, [addToast]);
+
+  useEffect(() => {
+    return () => {
+      timeoutIds.current.forEach(clearTimeout);
+    };
+  }, []);
 
   if (messages.length === 0) return null;
 

@@ -1,19 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { type TradingSimulation, type Position, formatPrice } from "../hooks/useTradingSimulation";
-
-type Algo = {
-  id: number;
-  name: string;
-};
-
-type AlgoRun = {
-  algo_id: number;
-  status: string;
-  mode: string;
-  account: string;
-  data_source_id: string;
-  instance_id: string;
-};
+import type { Algo, AlgoRun } from "../types";
 
 type TradingViewProps = {
   simulation: TradingSimulation;
@@ -28,36 +15,45 @@ const useSmoothedPositions = (positions: Position[]) => {
   const displayRef = useRef<Position[]>(positions);
   const [display, setDisplay] = useState(positions);
   const rafRef = useRef<number>(0);
+  const isAnimating = useRef(false);
 
   useEffect(() => {
     displayRef.current = display;
   }, [display]);
 
-  useEffect(() => {
-    let running = true;
-    const tick = () => {
-      if (!running) return;
-      const current = displayRef.current;
-      let changed = false;
-      const next = positions.map((p) => {
-        const existing = current.find((d) => d.symbol === p.symbol && d.algoId === p.algoId);
-        if (!existing) return p;
-        const smoothed = lerp(existing.pnl, p.targetPnl, 0.08);
-        if (Math.abs(smoothed - existing.pnl) > 0.01) changed = true;
-        return { ...p, pnl: smoothed };
-      });
-      if (changed || next.length !== current.length) {
-        displayRef.current = next;
-        setDisplay(next);
-      }
+  const tick = useCallback(() => {
+    const current = displayRef.current;
+    let needsMore = false;
+    const next = positions.map((p) => {
+      const existing = current.find((d) => d.symbol === p.symbol && d.algoId === p.algoId);
+      if (!existing) return p;
+      const smoothed = lerp(existing.pnl, p.targetPnl, 0.08);
+      if (Math.abs(smoothed - p.targetPnl) > 0.001) needsMore = true;
+      return { ...p, pnl: smoothed };
+    });
+    const changed = needsMore || next.length !== current.length ||
+      next.some((n, i) => Math.abs(n.pnl - current[i]?.pnl) > 0.001);
+    if (changed) {
+      displayRef.current = next;
+      setDisplay(next);
+    }
+    if (needsMore) {
       rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      running = false;
-      cancelAnimationFrame(rafRef.current);
-    };
+    } else {
+      isAnimating.current = false;
+    }
   }, [positions]);
+
+  useEffect(() => {
+    if (!isAnimating.current) {
+      isAnimating.current = true;
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      isAnimating.current = false;
+    };
+  }, [tick]);
 
   return display;
 };
@@ -67,25 +63,30 @@ const useAnimatedNumber = (target: number, speed = 0.08) => {
   const currentRef = useRef(target);
   const [display, setDisplay] = useState(target);
   const rafRef = useRef<number>(0);
+  const isAnimating = useRef(false);
 
   useEffect(() => {
-    let running = true;
     const tick = () => {
-      if (!running) return;
       const next = lerp(currentRef.current, target, speed);
-      if (Math.abs(next - currentRef.current) > 0.005) {
+      if (Math.abs(next - target) > 0.01) {
         currentRef.current = next;
         setDisplay(next);
-      } else if (currentRef.current !== target) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
         currentRef.current = target;
         setDisplay(target);
+        isAnimating.current = false;
       }
-      rafRef.current = requestAnimationFrame(tick);
     };
-    rafRef.current = requestAnimationFrame(tick);
+
+    if (!isAnimating.current) {
+      isAnimating.current = true;
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
     return () => {
-      running = false;
       cancelAnimationFrame(rafRef.current);
+      isAnimating.current = false;
     };
   }, [target, speed]);
 
@@ -297,18 +298,24 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
               </button>
               {runningAlgos.map((algo) => {
                 const run = activeRuns.find((r) => r.algo_id === algo.id);
-                const modeColor = run?.mode === "live" ? "accent-green" : "accent-yellow";
+                const isLive = run?.mode === "live";
+                const selectedClasses = isLive
+                  ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+                  : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]";
+                const dotClass = isLive
+                  ? "bg-[var(--accent-green)]"
+                  : "bg-[var(--accent-yellow)]";
                 return (
                   <button
                     key={algo.id}
                     onClick={() => setSelectedAlgoId(algo.id === selectedAlgoId ? null : algo.id)}
                     className={`px-3 py-1.5 text-[11px] rounded-md transition-colors flex items-center gap-1.5 ${
                       selectedAlgoId === algo.id
-                        ? `bg-[var(--${modeColor})]/15 text-[var(--${modeColor})]`
+                        ? selectedClasses
                         : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
                     }`}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full bg-[var(--${modeColor})]`} />
+                    <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
                     {algo.name}
                   </button>
                 );

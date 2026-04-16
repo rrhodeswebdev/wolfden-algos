@@ -92,6 +92,11 @@ pub fn create_algo_instance(
     mode: String,
     risk_config: Option<RiskConfig>,
 ) -> Result<AlgoInstance, String> {
+    // Validate mode before proceeding
+    if mode != "shadow" && mode != "live" {
+        return Err(format!("Invalid mode '{}': must be 'shadow' or 'live'", mode));
+    }
+
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let rc = risk_config.unwrap_or(RiskConfig {
@@ -125,8 +130,10 @@ pub fn start_algo_instance(
 ) -> Result<(), String> {
     log::info!("start_algo_instance: received request for instance_id={}", instance_id);
 
-    // Install per-algo deps if needed before spawning
-    {
+    // Install per-algo deps if needed before spawning.
+    // Read DB state first, then drop the lock before running pip install
+    // (which spawns a synchronous subprocess and can block for a long time).
+    let pip_install_info: Option<(String, String, i64, String)> = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         let instance = db::get_algo_instance_by_id(&conn, &instance_id)
             .map_err(|e| format!("Instance not found: {}", e))?;
@@ -137,20 +144,29 @@ pub fn start_algo_instance(
         if !deps.is_empty() {
             let current_hash = venv_manager::VenvManager::hash_deps(&deps);
             if current_hash != algo.deps_hash {
-                log::info!("Installing dependencies for algo {} (hash changed)", algo.name);
-                let result = venv_state.0.install_algo_deps(&deps);
-                if !result.success {
-                    return Err(format!("Failed to install dependencies:\n{}", result.output));
-                }
-                // Update deps_hash
-                conn.execute(
-                    "UPDATE algos SET deps_hash = ?1 WHERE id = ?2",
-                    rusqlite::params![current_hash, instance.algo_id],
-                )
-                .map_err(|e| format!("Failed to update deps_hash: {}", e))?;
-                log::info!("Dependencies installed for algo {}", algo.name);
+                Some((deps, current_hash, instance.algo_id, algo.name.clone()))
+            } else {
+                None
             }
+        } else {
+            None
         }
+    }; // DB lock dropped here
+
+    if let Some((deps, current_hash, algo_id, algo_name)) = pip_install_info {
+        log::info!("Installing dependencies for algo {} (hash changed)", algo_name);
+        let result = venv_state.0.install_algo_deps(&deps);
+        if !result.success {
+            return Err(format!("Failed to install dependencies:\n{}", result.output));
+        }
+        // Re-acquire DB lock to update deps_hash
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE algos SET deps_hash = ?1 WHERE id = ?2",
+            rusqlite::params![current_hash, algo_id],
+        )
+        .map_err(|e| format!("Failed to update deps_hash: {}", e))?;
+        log::info!("Dependencies installed for algo {}", algo_name);
     }
 
     let (pid, handles) = proc_state.0.start_instance(&db_state, &instance_id)?;

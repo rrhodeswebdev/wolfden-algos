@@ -39,13 +39,14 @@ impl AiTerminalManager {
     }
 
     fn find_project_root() -> PathBuf {
+        // Try exe-relative path first (most reliable in production), then CWD-based fallbacks for dev
         let candidates = [
-            PathBuf::from("."),
-            PathBuf::from(".."),
             std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                 .unwrap_or_default(),
+            PathBuf::from("."),
+            PathBuf::from(".."),
         ];
         for c in &candidates {
             if c.join("algo_runtime").exists() {
@@ -203,13 +204,23 @@ impl AiTerminalManager {
 
         let mut cmd = CommandBuilder::new(&claude_path);
         cmd.arg("--allowedTools");
-        cmd.arg("Edit,Write,Read");
+        cmd.arg("Edit");
+        cmd.arg("Write");
+        cmd.arg("Read");
+        cmd.arg("Skill");
         cmd.arg("--system-prompt");
         cmd.arg(format!(
-            "You are editing the trading algo \"{}\". The algo file is at {}. Only modify this file.",
-            algo.name, algo_file.display()
+            "You are editing the trading algo \"{name}\". The algo file is at {path}.\n\n\
+             FIRST: Load the wolfden-algo skill before doing anything.\n\n\
+             Rules:\n\
+             - Only read and modify this file. Do not read, search, or explore any other files.\n\
+             - Everything you need is in the wolfden-algo skill. Do not look at wolf_types.py, runner.py, examples/, or other algo files.\n\
+             - Use the skill's embedded examples as reference, not files on disk.\n\
+             - Only respond to questions about this algo, trading strategies, and the Wolf Den algo API. Decline all unrelated requests.",
+            name = algo.name,
+            path = algo_file.display()
         ));
-        cmd.cwd(self.project_root.join("algo_runtime"));
+        cmd.cwd(&self.project_root);
 
         let child = pty_pair
             .slave

@@ -131,31 +131,40 @@ pub async fn start_publisher(
                                 instance_id, order_id, state, filled_qty,
                                 fill_price, timestamp, ..
                             } if state == "filled" || state == "partFilled" => {
-                                let tracker = order_tracker.lock().await;
+                                let is_filled = state == "filled";
+                                let mut tracker = order_tracker.lock().await;
                                 if let Some(pending) = tracker.get(order_id) {
                                     let qty = filled_qty.unwrap_or(0);
                                     let price = fill_price.unwrap_or(0.0);
                                     let ts = timestamp.unwrap_or(0);
                                     let topic = format!("fill:{}", instance_id);
+                                    let symbol = pending.symbol.clone();
+                                    let side = pending.side.clone();
+                                    // Remove filled orders from tracker to prevent memory leak.
+                                    // partFilled orders are kept for subsequent fill updates.
+                                    if is_filled {
+                                        tracker.remove(order_id);
+                                    }
+                                    drop(tracker);
                                     let payload = rmp_serde::to_vec(&serde_json::json!({
                                         "type": "fill",
-                                        "symbol": pending.symbol,
-                                        "side": pending.side,
+                                        "symbol": symbol,
+                                        "side": side,
                                         "qty": qty,
                                         "price": price,
                                         "order_id": order_id,
                                         "timestamp": ts,
                                     }))?;
-                                    drop(tracker);
                                     send_pub(&mut pub_socket, &topic, &payload).await
                                 } else {
                                     log::warn!("OrderUpdate for unknown order_id={}", order_id);
                                     Ok(())
                                 }
                             }
-                            // Clean up tracker on terminal order states
+                            // Clean up tracker on terminal order states (cancelled/rejected only;
+                            // filled is handled above)
                             NtInbound::OrderUpdate { order_id, state, .. }
-                                if state == "filled" || state == "cancelled" || state == "rejected" =>
+                                if state == "cancelled" || state == "rejected" =>
                             {
                                 let mut tracker = order_tracker.lock().await;
                                 tracker.remove(order_id);
