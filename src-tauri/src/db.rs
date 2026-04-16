@@ -127,40 +127,7 @@ pub fn initialize(path: &Path) -> Result<Connection> {
         [],
     )?;
 
-    seed_sample_algos(&conn)?;
-
     Ok(conn)
-}
-
-fn seed_sample_algos(conn: &Connection) -> Result<()> {
-    let samples: &[(&str, &str)] = &[
-        ("Demo: EMA Crossover", include_str!("../../algo_runtime/examples/ema_cross.py")),
-        ("Demo: CVD Divergence", include_str!("../../algo_runtime/examples/cvd_divergence.py")),
-        ("Demo: Scalper", include_str!("../../algo_runtime/examples/scalper.py")),
-        ("Demo: Prev Candle Breakout", include_str!("../../algo_runtime/examples/prev_candle_breakout.py")),
-    ];
-
-    for (name, code) in samples {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM algos WHERE name = ?1)",
-            params![name],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            conn.execute(
-                "INSERT INTO algos (name, code, dependencies) VALUES (?1, ?2, '')",
-                params![name, code],
-            )?;
-        } else {
-            // Update demo algos to latest code on each launch
-            conn.execute(
-                "UPDATE algos SET code = ?1, updated_at = datetime('now') WHERE name = ?2",
-                params![code, name],
-            )?;
-        }
-    }
-
-    Ok(())
 }
 
 // --- Algo CRUD ---

@@ -25,10 +25,17 @@ def create_algo(
 
     def init() -> dict:
         return {
-            "prices": (),
+            "seed_prices": (),
+            "seeded": False,
+            "tick_count": 0,
+            "fast_ema": 0.0,
+            "slow_ema": 0.0,
+            "prev_fast_ema": 0.0,
+            "prev_slow_ema": 0.0,
             "highs": (),
             "lows": (),
             "closes": (),
+            "atr": 0.0,
             "stop_price": 0.0,
             "target_price": 0.0,
             "trail_active": False,
@@ -61,43 +68,56 @@ def create_algo(
             atr_val = tr * k + atr_val * (1 - k)
         return atr_val
 
+    def _seed_emas(prices):
+        """Compute initial EMA values from seed prices."""
+        fast_ema = prices[0]
+        for p in prices[1:]:
+            fast_ema = _ema_step(fast_ema, p, fast_period)
+        slow_ema = prices[0]
+        for p in prices[1:]:
+            slow_ema = _ema_step(slow_ema, p, slow_period)
+        return fast_ema, slow_ema
+
     def on_tick(state, tick, ctx):
-        prices = (*state["prices"], tick.price)[-(slow_period + 5):]
         ticks_since = state["ticks_since_last_trade"] + 1
-        new_state = {**state, "prices": prices, "ticks_since_last_trade": ticks_since}
 
         if state["daily_halted"]:
+            new_state = {**state, "ticks_since_last_trade": ticks_since}
             return AlgoResult(new_state, ())
 
-        if len(prices) < slow_period:
+        # --- Seeding phase: accumulate prices until we have slow_period ---
+        if not state["seeded"]:
+            seed_prices = (*state["seed_prices"], tick.price)
+            tick_count = state["tick_count"] + 1
+
+            if tick_count < slow_period:
+                new_state = {**state, "seed_prices": seed_prices,
+                             "tick_count": tick_count,
+                             "ticks_since_last_trade": ticks_since}
+                return AlgoResult(new_state, ())
+
+            # We have exactly slow_period prices — seed EMAs
+            fast_ema, slow_ema = _seed_emas(seed_prices)
+            new_state = {**state, "seeded": True, "seed_prices": (),
+                         "tick_count": tick_count,
+                         "fast_ema": fast_ema, "slow_ema": slow_ema,
+                         "prev_fast_ema": fast_ema, "prev_slow_ema": slow_ema,
+                         "ticks_since_last_trade": ticks_since}
             return AlgoResult(new_state, ())
 
-        # Compute EMAs — seed with first price, then apply EMA over remaining
-        fast_window = prices[-fast_period:]
-        fast_ema = fast_window[0]
-        for p in fast_window[1:]:
-            fast_ema = _ema_step(fast_ema, p, fast_period)
+        # --- Seeded: O(1) incremental EMA update ---
+        prev_fast = state["fast_ema"]
+        prev_slow = state["slow_ema"]
+        fast_ema = _ema_step(prev_fast, tick.price, fast_period)
+        slow_ema = _ema_step(prev_slow, tick.price, slow_period)
 
-        slow_window = prices[-slow_period:]
-        slow_ema = slow_window[0]
-        for p in slow_window[1:]:
-            slow_ema = _ema_step(slow_ema, p, slow_period)
-
-        prev_prices = prices[:-1]
-        if len(prev_prices) >= slow_period:
-            prev_fast_window = prev_prices[-fast_period:]
-            prev_fast = prev_fast_window[0]
-            for p in prev_fast_window[1:]:
-                prev_fast = _ema_step(prev_fast, p, fast_period)
-            prev_slow_window = prev_prices[-slow_period:]
-            prev_slow = prev_slow_window[0]
-            for p in prev_slow_window[1:]:
-                prev_slow = _ema_step(prev_slow, p, slow_period)
-        else:
-            return AlgoResult(new_state, ())
+        new_state = {**state,
+                     "fast_ema": fast_ema, "slow_ema": slow_ema,
+                     "prev_fast_ema": prev_fast, "prev_slow_ema": prev_slow,
+                     "ticks_since_last_trade": ticks_since}
 
         position = ctx.position
-        orders = ()
+        atr_val = state["atr"]
 
         # --- Position management ---
 
@@ -113,7 +133,6 @@ def create_algo(
             else:
                 best = min(best, tick.price)
 
-            atr_val = _compute_atr(state["highs"], state["lows"], state["closes"])
             trail_active = state["trail_active"]
             favorable_move = (best - entry) * direction
 
@@ -176,7 +195,6 @@ def create_algo(
         if ticks_since < cooldown_ticks:
             return AlgoResult(new_state, ())
 
-        atr_val = _compute_atr(state["highs"], state["lows"], state["closes"])
         if atr_val <= 0:
             return AlgoResult(new_state, ())
 
@@ -205,7 +223,8 @@ def create_algo(
         highs = (*state["highs"], bar.h)[-(atr_period + 2):]
         lows = (*state["lows"], bar.l)[-(atr_period + 2):]
         closes = (*state["closes"], bar.c)[-(atr_period + 2):]
-        new_state = {**state, "highs": highs, "lows": lows, "closes": closes}
+        atr_val = _compute_atr(highs, lows, closes)
+        new_state = {**state, "highs": highs, "lows": lows, "closes": closes, "atr": atr_val}
         return AlgoResult(new_state, ())
 
     return {"init": init, "on_tick": on_tick, "on_bar": on_bar}

@@ -791,6 +791,8 @@ def run(args: argparse.Namespace) -> None:
                 if msg_type == "tick":
                     tick = make_tick(msg)
                     last_price = tick.price
+                    now_mono = time.monotonic()
+                    now_ms = int(time.time() * 1000)
 
                     # In shadow mode, check if any working orders are triggered by this tick
                     if is_shadow:
@@ -798,11 +800,13 @@ def run(args: argparse.Namespace) -> None:
                         if triggered:
                             state = _process_shadow_fills(triggered, state)
 
+                    # Build context once for both throttled emit and algo handler
+                    ctx = pos_tracker.build_context(symbol, last_price)
+
+                    if is_shadow:
                         # Emit throttled position update for live P&L tracking
-                        now = time.monotonic()
-                        if pos_tracker.position != 0 and (now - last_shadow_pos_emit) >= 0.25:
-                            last_shadow_pos_emit = now
-                            ctx_snap = pos_tracker.build_context(symbol, last_price)
+                        if pos_tracker.position != 0 and (now_mono - last_shadow_pos_emit) >= 0.25:
+                            last_shadow_pos_emit = now_mono
                             push.send(msgpack.packb({
                                 "type": "shadow_position",
                                 "instance_id": args.instance_id,
@@ -810,11 +814,9 @@ def run(args: argparse.Namespace) -> None:
                                 "symbol": symbol,
                                 "position": pos_tracker.position,
                                 "entry_price": pos_tracker.entry_price,
-                                "unrealized_pnl": ctx_snap.unrealized_pnl,
-                                "timestamp": int(time.time() * 1000),
+                                "unrealized_pnl": ctx.unrealized_pnl,
+                                "timestamp": now_ms,
                             }, use_bin_type=True))
-
-                    ctx = pos_tracker.build_context(symbol, last_price)
                     handler_name = "on_tick"
                     result = handlers["on_tick"](state, tick, ctx)
                 elif msg_type == "bar":

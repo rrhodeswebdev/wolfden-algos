@@ -52,6 +52,12 @@ def create_algo(
             "tick_count": 0,
             "cum_tp_vol": 0.0,
             "cum_vol": 0,
+            "atr": 0.0,
+            "rsi": 50.0,
+            "rsi_avg_gain": 0.0,
+            "rsi_avg_loss": 0.0,
+            "rsi_seeded": False,
+            "prev_close": 0.0,
         }
 
     def _compute_sma(values, period):
@@ -67,21 +73,36 @@ def create_algo(
         variance = sum((x - mean) ** 2 for x in data) / period
         return variance ** 0.5
 
-    def _compute_rsi(closes):
-        if len(closes) < rsi_period + 1:
-            return 50.0
+    def _seed_rsi(closes):
+        """Compute initial avg_gain/avg_loss from the first rsi_period+1 closes."""
         gains = []
         losses = []
-        for i in range(len(closes) - rsi_period, len(closes)):
+        for i in range(1, rsi_period + 1):
             diff = closes[i] - closes[i - 1]
             gains.append(max(diff, 0.0))
             losses.append(max(-diff, 0.0))
         avg_gain = sum(gains) / rsi_period
         avg_loss = sum(losses) / rsi_period
         if avg_loss == 0:
-            return 100.0
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
+            rsi_val = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi_val = 100.0 - (100.0 / (1.0 + rs))
+        return avg_gain, avg_loss, rsi_val
+
+    def _step_rsi(prev_avg_gain, prev_avg_loss, prev_close, new_close):
+        """Incremental Wilder's smoothing RSI update."""
+        diff = new_close - prev_close
+        gain = max(diff, 0.0)
+        loss = max(-diff, 0.0)
+        avg_gain = (prev_avg_gain * (rsi_period - 1) + gain) / rsi_period
+        avg_loss = (prev_avg_loss * (rsi_period - 1) + loss) / rsi_period
+        if avg_loss == 0:
+            rsi_val = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi_val = 100.0 - (100.0 / (1.0 + rs))
+        return avg_gain, avg_loss, rsi_val
 
     def _compute_atr(highs, lows, closes):
         if len(closes) < 2:
@@ -157,7 +178,7 @@ def create_algo(
                 return AlgoResult(flat_state, orders)
 
             # Breakeven stop
-            atr_val = _compute_atr(state["highs"], state["lows"], state["closes"])
+            atr_val = state["atr"]
             breakeven_set = state["breakeven_set"]
             favorable_move = (tick.price - entry) * direction
 
@@ -219,9 +240,35 @@ def create_algo(
         cum_vol = state["cum_vol"] + bar.v
         vwap_val = cum_tp_vol / cum_vol if cum_vol > 0 else bar.c
 
-        new_state = {**state, "closes": closes, "volumes": volumes,
-                     "highs": highs, "lows": lows,
-                     "cum_tp_vol": cum_tp_vol, "cum_vol": cum_vol}
+        # Compute ATR and store in state (avoids recomputing on every tick)
+        atr_val = _compute_atr(highs, lows, closes)
+
+        # Incremental RSI via Wilder's smoothing
+        if not state["rsi_seeded"]:
+            if len(closes) >= rsi_period + 1:
+                avg_gain, avg_loss, rsi_val = _seed_rsi(closes)
+                new_state = {**state, "closes": closes, "volumes": volumes,
+                             "highs": highs, "lows": lows,
+                             "cum_tp_vol": cum_tp_vol, "cum_vol": cum_vol,
+                             "atr": atr_val,
+                             "rsi": rsi_val, "rsi_avg_gain": avg_gain,
+                             "rsi_avg_loss": avg_loss, "rsi_seeded": True,
+                             "prev_close": bar.c}
+            else:
+                new_state = {**state, "closes": closes, "volumes": volumes,
+                             "highs": highs, "lows": lows,
+                             "cum_tp_vol": cum_tp_vol, "cum_vol": cum_vol,
+                             "atr": atr_val, "prev_close": bar.c}
+        else:
+            avg_gain, avg_loss, rsi_val = _step_rsi(
+                state["rsi_avg_gain"], state["rsi_avg_loss"],
+                state["prev_close"], bar.c)
+            new_state = {**state, "closes": closes, "volumes": volumes,
+                         "highs": highs, "lows": lows,
+                         "cum_tp_vol": cum_tp_vol, "cum_vol": cum_vol,
+                         "atr": atr_val,
+                         "rsi": rsi_val, "rsi_avg_gain": avg_gain,
+                         "rsi_avg_loss": avg_loss, "prev_close": bar.c}
 
         if state["daily_halted"] or ctx.position != 0:
             return AlgoResult(new_state, ())
@@ -247,8 +294,7 @@ def create_algo(
 
         bb_upper = bb_mid + bb_std_dev * bb_std
         bb_lower = bb_mid - bb_std_dev * bb_std
-        rsi_val = _compute_rsi(closes)
-        atr_val = _compute_atr(highs, lows, closes)
+        rsi_val = new_state["rsi"]
 
         if atr_val <= 0:
             return AlgoResult(new_state, ())
