@@ -907,16 +907,19 @@ def main() -> None:
     parser.add_argument("--max-position-size", type=int, default=5, help="Max position size (contracts)")
     parser.add_argument("--max-daily-loss", type=float, default=500.0, help="Max daily loss before halting ($)")
     parser.add_argument("--max-daily-trades", type=int, default=50, help="Max trades per day")
+    parser.add_argument("--allowed-dir", action="append", default=[], help="Additional allowed directory for algo files")
     args = parser.parse_args()
 
     # C6: Validate --algo-path is within allowed directories
     script_dir = os.path.dirname(os.path.realpath(__file__))
     algo_real = os.path.realpath(args.algo_path)
-    allowed_prefixes = (
+    allowed_prefixes = [
         os.path.join(script_dir, "algos") + os.sep,
         os.path.join(script_dir, "examples") + os.sep,
-    )
-    if not algo_real.startswith(allowed_prefixes):
+    ]
+    for d in args.allowed_dir:
+        allowed_prefixes.append(os.path.realpath(d) + os.sep)
+    if not algo_real.startswith(tuple(allowed_prefixes)):
         print(f"[runner] Error: algo path '{algo_real}' is not within allowed directories "
               f"({', '.join(allowed_prefixes)})", file=sys.stderr)
         sys.exit(1)
