@@ -37,7 +37,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../algo_runtime/**/*"
+      "../algo_runtime/**/*",
+      "python/**/*"
     ],
     "windows": {
       "nsis": {
