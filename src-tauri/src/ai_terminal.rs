@@ -202,7 +202,17 @@ impl AiTerminalManager {
             })
             .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-        let mut cmd = CommandBuilder::new(&claude_path);
+        // CreateProcessW (used by portable-pty on Windows) can't execute .cmd
+        // or .bat files directly — route those through cmd.exe /C. Everything
+        // else runs unwrapped.
+        let mut cmd = if needs_cmd_wrapper(&claude_path) {
+            let mut c = CommandBuilder::new("cmd.exe");
+            c.arg("/C");
+            c.arg(claude_path.as_os_str());
+            c
+        } else {
+            CommandBuilder::new(claude_path.as_os_str())
+        };
         cmd.arg("--allowedTools");
         cmd.arg("Edit");
         cmd.arg("Write");
@@ -345,14 +355,60 @@ impl AiTerminalManager {
     }
 }
 
-/// Searches PATH for the `claude` binary.
-fn which_claude() -> Option<String> {
+/// Locates the Claude Code CLI on disk.
+///
+/// On Windows, `npm install -g` drops three shims into `%APPDATA%\npm\`:
+/// `claude.cmd` (primary), `claude.ps1`, and sometimes a bare `claude`
+/// bash script. We probe PATH plus common npm global dirs because an
+/// installed GUI app doesn't always inherit every PATH entry the user
+/// sees in an interactive shell.
+fn which_claude() -> Option<PathBuf> {
     let path_var = std::env::var("PATH").unwrap_or_default();
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join("claude");
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().to_string());
+    let mut dirs: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
+
+    if cfg!(windows) {
+        // Fallback probes — npm global bin is frequently here even when PATH
+        // doesn't carry it into the Tauri process environment.
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(local_appdata).join("npm"));
+        }
+    }
+
+    // Extension order mirrors a reasonable PATHEXT precedence; `.cmd` first
+    // because that's what npm's cmd-shim generates and what Windows users
+    // actually invoke.
+    let exts: &[&str] = if cfg!(windows) {
+        &[".cmd", ".exe", ".bat", ".ps1", ""]
+    } else {
+        &[""]
+    };
+
+    for dir in dirs {
+        for ext in exts {
+            let candidate = dir.join(format!("claude{}", ext));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None
+}
+
+/// Returns true if `path` is a Windows batch file that must be launched via
+/// `cmd.exe /C` — `CreateProcessW` (which portable-pty wraps) won't execute
+/// `.cmd` / `.bat` scripts directly.
+fn needs_cmd_wrapper(path: &PathBuf) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => {
+            let ext = ext.to_ascii_lowercase();
+            ext == "cmd" || ext == "bat"
+        }
+        None => false,
+    }
 }
