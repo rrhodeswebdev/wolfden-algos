@@ -64,7 +64,11 @@ pub fn run() {
             app.manage(ProcState(process_manager::ProcessManager::new(data_dir.clone(), venv_python)));
 
             // Initialize AI terminal manager
-            app.manage(AiTermState(ai_terminal::AiTerminalManager::new(db_path.clone())));
+            let ai_resource_dir = app.path().resource_dir().ok();
+            app.manage(AiTermState(ai_terminal::AiTerminalManager::new(
+                db_path.clone(),
+                ai_resource_dir,
+            )));
 
             // Start WebSocket server for NinjaTrader connections
             let (inbound_tx, _) = broadcast::channel(256);

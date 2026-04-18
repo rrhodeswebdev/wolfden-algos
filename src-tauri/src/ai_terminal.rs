@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -29,13 +29,62 @@ pub struct AiTerminalManager {
 }
 
 impl AiTerminalManager {
-    pub fn new(db_path: PathBuf) -> Self {
+    pub fn new(db_path: PathBuf, resource_dir: Option<PathBuf>) -> Self {
         let project_root = Self::find_project_root();
+
+        // Claude's `Skill` tool discovers skills under <cwd>/.claude/skills/.
+        // Bundled resources declared with "../" in tauri.conf.json land under
+        // <resource_dir>/_up_/ (Tauri v2 mangles upward traversal — same quirk
+        // documented in venv_manager.rs). Copy the bundled skill into
+        // project_root so Claude can find it from the cwd we hand it.
+        if let Err(e) = Self::install_bundled_skill(&project_root, resource_dir.as_deref()) {
+            log::warn!("Failed to install wolfden-algo skill into project root: {}", e);
+        }
+
         AiTerminalManager {
             sessions: Mutex::new(HashMap::new()),
             project_root,
             db_path,
         }
+    }
+
+    /// Copies the bundled wolfden-algo skill into <project_root>/.claude/skills/
+    /// so Claude's Skill tool can discover it from its cwd. No-op in dev mode
+    /// (resource_dir = None) because the source tree already has the skill.
+    fn install_bundled_skill(
+        project_root: &Path,
+        resource_dir: Option<&Path>,
+    ) -> std::io::Result<()> {
+        let res_dir = match resource_dir {
+            Some(d) => d,
+            None => return Ok(()),
+        };
+
+        let rel = Path::new(".claude")
+            .join("skills")
+            .join("wolfden-algo")
+            .join("SKILL.md");
+
+        // _up_ first (the actual Tauri v2 layout), bare path as defensive fallback.
+        let candidates = [res_dir.join("_up_").join(&rel), res_dir.join(&rel)];
+        let source = match candidates.iter().find(|c| c.exists()) {
+            Some(p) => p,
+            None => {
+                log::warn!(
+                    "Bundled wolfden-algo skill not found in resource dir. Searched: {:?}",
+                    candidates
+                );
+                return Ok(());
+            }
+        };
+
+        let dest = project_root.join(&rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(source, &dest)?;
+        log::info!("Installed wolfden-algo skill at {:?}", dest);
+        Ok(())
     }
 
     fn find_project_root() -> PathBuf {
