@@ -38,6 +38,7 @@
     ],
     "resources": [
       "../algo_runtime/**/*",
+      "../.claude/skills/wolfden-algo/**/*",
       "python/**/*"
     ],
     "windows": {
