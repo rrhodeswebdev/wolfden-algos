@@ -93,10 +93,10 @@ export const HomeView = (props: HomeViewProps) => {
         : `${positionSymbols.slice(0, 3).join(" · ")} +${positionSymbols.length - 3}`;
 
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
-  const [visibleInstanceIds, setVisibleInstanceIds] = useState<Set<string>>(() => new Set(props.activeRuns.map((r) => r.instance_id)));
+  const [hiddenInstanceIds, setHiddenInstanceIds] = useState<Set<string>>(() => new Set());
 
   const toggleInstanceVisibility = (instanceId: string) => {
-    setVisibleInstanceIds((prev) => {
+    setHiddenInstanceIds((prev) => {
       const next = new Set(prev);
       if (next.has(instanceId)) next.delete(instanceId);
       else next.add(instanceId);
@@ -196,7 +196,7 @@ export const HomeView = (props: HomeViewProps) => {
             runPnlHistories={props.runPnlHistories}
             activeRuns={props.activeRuns}
             algos={props.algos}
-            visibleInstanceIds={visibleInstanceIds}
+            hiddenInstanceIds={hiddenInstanceIds}
             onToggleInstance={toggleInstanceVisibility}
           />
         </div>
@@ -305,12 +305,15 @@ type SessionPnlChartProps = {
   runPnlHistories: Record<string, number[]>;
   activeRuns: AlgoRun[];
   algos: Algo[];
-  visibleInstanceIds: Set<string>;
+  hiddenInstanceIds: Set<string>;
   onToggleInstance: (instanceId: string) => void;
 };
 
-const SessionPnlChart = ({ pnlHistory, runPnlHistories, activeRuns, algos, visibleInstanceIds, onToggleInstance }: SessionPnlChartProps) => {
-  const instances = activeRuns.filter((r) => runPnlHistories[r.instance_id]?.length);
+const SessionPnlChart = ({ pnlHistory, runPnlHistories, activeRuns, algos, hiddenInstanceIds, onToggleInstance }: SessionPnlChartProps) => {
+  const instances = useMemo(
+    () => activeRuns.filter((r) => runPnlHistories[r.instance_id]?.length),
+    [activeRuns, runPnlHistories]
+  );
 
   const data = useMemo<uPlot.AlignedData>(() => {
     const length = Math.max(pnlHistory.length, ...instances.map((r) => runPnlHistories[r.instance_id]?.length ?? 0), 1);
@@ -340,10 +343,10 @@ const SessionPnlChart = ({ pnlHistory, runPnlHistories, activeRuns, algos, visib
         label: algos.find((a) => a.id === r.algo_id)?.name ?? `algo ${r.algo_id}`,
         stroke: CHART_PALETTE[(i + 1) % CHART_PALETTE.length],
         width: 1.5,
-        show: visibleInstanceIds.has(r.instance_id),
+        show: !hiddenInstanceIds.has(r.instance_id),
       })),
     ],
-  }), [instances, algos, visibleInstanceIds]);
+  }), [instances, algos, hiddenInstanceIds]);
 
   if (pnlHistory.length <= 1) {
     return (
@@ -364,7 +367,7 @@ const SessionPnlChart = ({ pnlHistory, runPnlHistories, activeRuns, algos, visib
               key={r.instance_id}
               color={CHART_PALETTE[(i + 1) % CHART_PALETTE.length]}
               label={algoName}
-              visible={visibleInstanceIds.has(r.instance_id)}
+              visible={!hiddenInstanceIds.has(r.instance_id)}
               onClick={() => onToggleInstance(r.instance_id)}
             />
           );
