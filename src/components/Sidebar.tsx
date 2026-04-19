@@ -32,61 +32,56 @@ const openGuideWindow = async () => {
 };
 
 export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarProps) => {
+  const statusTitle =
+    connectionStatus === "connected"
+      ? "NinjaTrader Connected"
+      : connectionStatus === "error"
+        ? "Connection Error"
+        : "Waiting for NinjaTrader...";
+
   return (
-    <div className="flex flex-col w-20 bg-[var(--bg-secondary)] border-r border-[var(--border)] select-none">
+    <div className="flex flex-col w-[52px] bg-[var(--bg-secondary)] border-r border-[var(--border)] select-none">
       {/* Logo */}
-      <div className="flex items-center justify-center h-20 border-b border-[var(--border)] p-1">
-        <img src="/wolf-den-logo.svg" alt="Wolf Den" className="w-full h-full object-contain" />
+      <div className="flex items-center justify-center h-12 border-b border-[var(--border)] p-1.5">
+        <img src="/wolf-den-logo.svg" alt="Wolf Den" className="w-8 h-8 object-contain" />
       </div>
 
       {/* Nav Items */}
-      <nav className="flex-1 flex flex-col items-center pt-6 gap-4">
+      <nav className="flex-1 flex flex-col items-center pt-3 gap-1">
         {NAV_ITEMS.map(({ view, label, icon }) => (
           <button
             key={view}
             onClick={() => onNavigate(view)}
-            className={`flex flex-col items-center justify-center w-14 h-14 rounded-xl transition-colors ${
+            title={label}
+            className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
               activeView === view
                 ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-panel)] hover:text-[var(--text-primary)]"
             }`}
-            title={label}
           >
-            <span className="text-lg leading-none">{icon}</span>
-            <span className="text-[9px] mt-1.5 font-medium uppercase tracking-wider">{label}</span>
+            <span className="text-base leading-none">{icon}</span>
           </button>
         ))}
       </nav>
 
-      {/* Guide (bottom) */}
-      <div className="flex flex-col items-center pb-4 gap-4">
+      {/* Guide + Connection Status (bottom, centered) */}
+      <div className="flex flex-col items-center pb-3 gap-2">
         <button
           onClick={openGuideWindow}
-          className="flex flex-col items-center justify-center w-14 h-14 rounded-xl transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-panel)] hover:text-[var(--text-primary)]"
           title="Guide"
+          className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-panel)] hover:text-[var(--text-primary)]"
         >
-          <span className="text-lg leading-none">?</span>
-          <span className="text-[9px] mt-1.5 font-medium uppercase tracking-wider">Guide</span>
+          <span className="text-base leading-none">?</span>
         </button>
-      </div>
-
-      {/* Connection Status */}
-      <div className="flex items-center justify-center pb-6">
         <div
-          className={`w-3 h-3 rounded-full ${
+          title={statusTitle}
+          className={`w-2 h-2 rounded-full ${
             connectionStatus === "connected"
               ? "bg-[var(--accent-green)]"
               : connectionStatus === "error"
                 ? "bg-[var(--accent-red)]"
                 : "bg-[var(--accent-yellow)] animate-pulse"
           }`}
-          title={
-            connectionStatus === "connected"
-              ? "NinjaTrader Connected"
-              : connectionStatus === "error"
-                ? "Connection Error"
-                : "Waiting for NinjaTrader..."
-          }
         />
       </div>
     </div>

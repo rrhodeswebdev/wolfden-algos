@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Variant B · Workspace · Editor Prototype</title>
+    <link rel="stylesheet" href="_shared.css" />
+    <style>
+      .app { display: flex; flex-direction: column; height: 100vh; }
+
+      /* Top shell */
+      .topshell {
+        height: 38px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 12px 0 14px;
+        gap: 12px;
+        background: var(--bg-primary);
+      }
+      .topshell .brand {
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: -0.01em;
+      }
+      .topshell .crumb {
+        font-size: 12px;
+        color: var(--text-secondary);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .topshell .crumb span.sep { color: var(--border-strong); }
+      .topshell .palette {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px 4px 8px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        min-width: 260px;
+      }
+      .topshell .palette kbd {
+        margin-left: auto;
+        padding: 1px 5px;
+        background: var(--bg-secondary);
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      /* Main frame */
+      .frame { display: flex; flex: 1; min-height: 0; }
+
+      /* Activity bar */
+      .activity {
+        width: 52px;
+        flex-shrink: 0;
+        background: var(--bg-primary);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 10px 0;
+        gap: 4px;
+      }
+      .act-btn {
+        width: 40px;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        color: var(--text-muted);
+        position: relative;
+        transition: background 0.12s, color 0.12s;
+      }
+      .act-btn:hover { background: var(--bg-panel); color: var(--text-primary); }
+      .act-btn.active {
+        background: var(--bg-panel);
+        color: var(--accent-blue);
+      }
+      .act-btn.active::before {
+        content: "";
+        position: absolute;
+        left: -6px;
+        top: 8px;
+        bottom: 8px;
+        width: 3px;
+        border-radius: 2px;
+        background: var(--accent-blue);
+      }
+      .act-spacer { flex: 1; }
+
+      /* Sidebar */
+      .sidebar {
+        width: 260px;
+        flex-shrink: 0;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .side-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .side-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      .side-head .actions { display: flex; gap: 2px; }
+      .side-head .actions button {
+        width: 24px; height: 24px;
+        border-radius: 6px;
+        color: var(--text-secondary);
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .side-head .actions button:hover { background: var(--bg-secondary); color: var(--text-primary); }
+
+      .algo-tree { flex: 1; overflow: auto; padding: 8px 4px; font-size: 13px; }
+      .tree-group {
+        padding: 4px 10px 4px 6px;
+        color: var(--text-secondary);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+      }
+      .tree-group svg { transition: transform 0.15s; }
+      .tree-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px 4px 24px;
+        border-radius: 6px;
+        cursor: pointer;
+        gap: 6px;
+      }
+      .tree-item:hover { background: var(--bg-secondary); }
+      .tree-item.active {
+        background: rgba(77,159,255,0.1);
+      }
+      .tree-item .left {
+        display: flex; align-items: center; gap: 8px;
+        color: var(--text-secondary);
+        min-width: 0;
+      }
+      .tree-item.active .left { color: var(--text-primary); }
+      .tree-item .file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tree-item .lang-tag {
+        width: 14px; height: 14px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 3px;
+        background: rgba(255,195,0,0.15);
+        color: var(--accent-yellow);
+        font-size: 9px;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+      .tree-item .meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+      .dirty-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--accent-yellow);
+      }
+      .pulse {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--accent-blue);
+        animation: pulse 1.8s ease-in-out infinite;
+      }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+      /* Editor column */
+      .editor-col { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-panel); }
+
+      /* Tab strip */
+      .tabstrip {
+        display: flex;
+        align-items: stretch;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        height: 38px;
+        overflow-x: auto;
+      }
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        border-right: 1px solid var(--border);
+        position: relative;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .tab:hover { background: rgba(255,255,255,0.02); color: var(--text-primary); }
+      .tab.active {
+        background: var(--bg-panel);
+        color: var(--text-primary);
+      }
+      .tab.active::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0; right: 0;
+        height: 2px;
+        background: var(--accent-blue);
+      }
+      .tab .close {
+        width: 16px; height: 16px;
+        border-radius: 4px;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: var(--text-muted);
+        opacity: 0.6;
+      }
+      .tab .close:hover { background: var(--bg-elevated); color: var(--text-primary); opacity: 1; }
+      .tab .lang-tag {
+        width: 14px; height: 14px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 3px;
+        background: rgba(255,195,0,0.15);
+        color: var(--accent-yellow);
+        font-size: 9px;
+        font-weight: 700;
+      }
+      .tabstrip-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 6px;
+        flex-shrink: 0;
+      }
+      .tab-icon-btn {
+        width: 26px; height: 26px;
+        border-radius: 6px;
+        color: var(--text-secondary);
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .tab-icon-btn:hover { background: var(--bg-panel); color: var(--text-primary); }
+
+      /* Sub-toolbar (breadcrumb) */
+      .subtool {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        background: var(--bg-panel);
+      }
+      .subtool .breadcrumb {
+        display: flex; align-items: center; gap: 6px; color: var(--text-muted);
+      }
+      .subtool .breadcrumb strong { color: var(--text-primary); font-weight: 600; }
+      .subtool .actions { display: flex; gap: 4px; align-items: center; }
+      .subtool button.run {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        background: var(--accent-green);
+        color: #000;
+        border-radius: 6px;
+      }
+      .subtool button.run:hover { opacity: 0.9; }
+      .subtool button.save {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        border-radius: 6px;
+      }
+      .subtool button.save:hover { background: var(--bg-elevated); color: var(--text-primary); }
+      .subtool .chip {
+        padding: 3px 8px;
+        font-size: 10px;
+        background: rgba(77,159,255,0.12);
+        color: var(--accent-blue);
+        border-radius: 999px;
+        font-weight: 500;
+      }
+
+      /* Editor pane */
+      .editor-pane { flex: 1; min-height: 0; background: var(--bg-panel); }
+      .editor-surface { padding: 12px 0; }
+
+      /* Status bar */
+      .statusbar {
+        height: 24px;
+        background: var(--bg-primary);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 12px;
+        font-size: 11px;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+      }
+      .status-seg {
+        padding: 0 8px;
+        height: 100%;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-right: 1px solid var(--border);
+      }
+      .status-seg:last-child { border-right: none; }
+      .status-seg.muted { color: var(--text-muted); }
+      .status-left, .status-right { display: flex; align-items: center; height: 100%; }
+      .status-seg.run {
+        background: var(--accent-blue);
+        color: #fff;
+      }
+      .status-seg.run:hover { opacity: 0.9; }
+      .status-seg.warn {
+        background: rgba(255,195,0,0.12);
+        color: var(--accent-yellow);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <!-- Top shell -->
+      <div class="topshell">
+        <div class="brand">Wolf Den</div>
+        <div class="crumb">
+          <span>Editor</span>
+          <span class="sep">·</span>
+          <span>momentum</span>
+        </div>
+        <div class="palette">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          <span>Go to algo, run command…</span>
+          <kbd>⌘K</kbd>
+        </div>
+      </div>
+
+      <!-- Frame -->
+      <div class="frame">
+        <!-- Activity bar -->
+        <div class="activity">
+          <button class="act-btn" title="Home">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12 12 3l9 9" /><path d="M5 10v10h14V10" /></svg>
+          </button>
+          <button class="act-btn active" title="Editor">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></svg>
+          </button>
+          <button class="act-btn" title="Runs">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 4 4 5-5" /></svg>
+          </button>
+          <button class="act-btn" title="Market">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20" /></svg>
+          </button>
+          <div class="act-spacer"></div>
+          <button class="act-btn" title="Settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+          </button>
+        </div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+          <div class="side-head">
+            <span class="side-title">Explorer</span>
+            <div class="actions">
+              <button title="New algo">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+              <button title="Create with AI">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" /></svg>
+              </button>
+              <button title="Refresh">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-15-6.7L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7" /><path d="M21 21v-5h-5" /></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="algo-tree">
+            <div class="tree-group">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" style="transform: rotate(90deg);"><path d="m9 18 6-6-6-6" /></svg>
+              Algos
+            </div>
+            <div class="tree-item active">
+              <div class="left">
+                <span class="lang-tag">Py</span>
+                <span class="file">momentum.py</span>
+              </div>
+              <div class="meta">
+                <span class="pulse" title="AI active"></span>
+                <span class="dirty-dot" title="Unsaved"></span>
+              </div>
+            </div>
+            <div class="tree-item">
+              <div class="left">
+                <span class="lang-tag">Py</span>
+                <span class="file">mean-reversion.py</span>
+              </div>
+            </div>
+            <div class="tree-item">
+              <div class="left">
+                <span class="lang-tag">Py</span>
+                <span class="file">pairs-trade.py</span>
+              </div>
+              <div class="meta">
+                <span class="dirty-dot" style="background: var(--text-muted);" title="Open"></span>
+              </div>
+            </div>
+            <div class="tree-item">
+              <div class="left">
+                <span class="lang-tag">Py</span>
+                <span class="file">volatility-breakout.py</span>
+              </div>
+            </div>
+
+            <div class="tree-group" style="margin-top:10px;">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="m9 18 6-6-6-6" /></svg>
+              Archive
+            </div>
+          </div>
+        </aside>
+
+        <!-- Editor column -->
+        <div class="editor-col">
+          <!-- Tabs -->
+          <div class="tabstrip">
+            <div class="tab active">
+              <span class="lang-tag">Py</span>
+              <span>momentum.py</span>
+              <span class="dirty-dot"></span>
+              <span class="close">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </span>
+            </div>
+            <div class="tab">
+              <span class="lang-tag">Py</span>
+              <span>pairs-trade.py</span>
+              <span class="close">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </span>
+            </div>
+            <div class="tabstrip-right">
+              <button class="tab-icon-btn" title="Split editor">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 3v18" /></svg>
+              </button>
+              <button class="tab-icon-btn" title="More">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Subtoolbar -->
+          <div class="subtool">
+            <div class="breadcrumb">
+              <span>Algos</span>
+              <span>/</span>
+              <strong>momentum.py</strong>
+              <span class="chip">deps · 3</span>
+            </div>
+            <div class="actions">
+              <button class="save">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                Save
+              </button>
+              <button class="run">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                Backtest
+              </button>
+            </div>
+          </div>
+
+          <!-- Editor -->
+          <div class="editor-pane">
+            <div class="editor-surface" id="editor-surface"></div>
+          </div>
+
+          <!-- Status bar -->
+          <div class="statusbar">
+            <div class="status-left">
+              <span class="status-seg warn">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6" /></svg>
+                Unsaved
+              </span>
+              <span class="status-seg">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 3 20 12 6 21z" /></svg>
+                main
+              </span>
+              <span class="status-seg muted">0 problems</span>
+              <span class="status-seg muted">AI: active</span>
+            </div>
+            <div class="status-right">
+              <span class="status-seg muted">Ln 12, Col 28</span>
+              <span class="status-seg muted">Spaces: 4</span>
+              <span class="status-seg muted">UTF-8</span>
+              <span class="status-seg muted">Python 3.11</span>
+              <span class="status-seg run">▶ Backtest</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="_shared.js"></script>
+    <script>
+      renderEditor(document.getElementById("editor-surface"), { activeLine: 12 });
+    </script>
+  </body>
+</html>

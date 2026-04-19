@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Editor View Prototypes · Wolf Den</title>
+    <link rel="stylesheet" href="_shared.css" />
+    <style>
+      body { overflow: auto; }
+      .container { max-width: 1000px; margin: 0 auto; padding: 72px 32px 96px; }
+      h1 {
+        font-size: 28px;
+        font-weight: 700;
+        margin: 0 0 6px;
+        letter-spacing: -0.02em;
+      }
+      .sub { color: var(--text-secondary); font-size: 14px; margin-bottom: 40px; }
+      .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+      @media (min-width: 820px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+      .card {
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        transition: border-color 0.15s, transform 0.15s;
+      }
+      .card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+      .card h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+      .card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+      .card .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent-blue);
+        font-weight: 600;
+      }
+      .card ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .card li {
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding-left: 14px;
+        position: relative;
+      }
+      .card li::before {
+        content: "";
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--border-strong);
+        position: absolute;
+        left: 2px;
+        top: 7px;
+      }
+      .card a.cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent-blue);
+        text-decoration: none;
+        margin-top: 4px;
+      }
+      .card a.cta:hover { text-decoration: underline; }
+      .section-h {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin: 48px 0 16px;
+        font-weight: 600;
+      }
+      .notes {
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px 24px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+      .notes strong { color: var(--text-primary); }
+      .notes code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        background: var(--bg-secondary);
+        padding: 1px 5px;
+        border-radius: 4px;
+        color: var(--accent-blue);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Editor View · Design Prototypes</h1>
+      <p class="sub">
+        Three directions for modernizing the algo editor. Open each variant, compare the chrome,
+        hierarchy, and feel — then tell me which direction (or which parts of which) to build.
+      </p>
+
+      <div class="grid">
+        <div class="card">
+          <span class="tag">Variant A</span>
+          <h3>Minimal · Linear-inspired</h3>
+          <p>
+            Restrained chrome. Contextual breadcrumb header replaces the static "Algo Editor" label.
+            Footer status bar carries saved-state, cursor position, and deps count.
+          </p>
+          <ul>
+            <li>Unsaved dot in sidebar + header</li>
+            <li>Autosave with visible state</li>
+            <li>Overflow <code>⋯</code> menu, not button row</li>
+            <li>Subtle sidebar search</li>
+          </ul>
+          <a class="cta" href="variant-a-minimal.html">Open prototype →</a>
+        </div>
+
+        <div class="card">
+          <span class="tag">Variant B</span>
+          <h3>Workspace · VS Code-inspired</h3>
+          <p>
+            Editor tabs. Activity bar on the far left. Multiple algos open at once. Richer status
+            bar. Familiar to anyone who's used VS Code or Cursor.
+          </p>
+          <ul>
+            <li>Tabs with dirty dot + close</li>
+            <li>Activity bar for future panels</li>
+            <li>Breadcrumb under tabs</li>
+            <li>⌘K command palette affordance</li>
+          </ul>
+          <a class="cta" href="variant-b-workspace.html">Open prototype →</a>
+        </div>
+
+        <div class="card">
+          <span class="tag">Variant C</span>
+          <h3>Focus · Writer-inspired</h3>
+          <p>
+            Max editor real estate. Sidebar collapses to a thin rail; peeks open on hover. Floating
+            ⌘K palette is the primary nav. For people who know their algos by name.
+          </p>
+          <ul>
+            <li>Collapsed rail with just algo count</li>
+            <li>Hover-peek sidebar</li>
+            <li>Floating command palette</li>
+            <li>Minimalist top bar</li>
+          </ul>
+          <a class="cta" href="variant-c-focus.html">Open prototype →</a>
+        </div>
+      </div>
+
+      <div class="section-h">Notes</div>
+      <div class="notes">
+        <strong>These are visual prototypes only.</strong> The editor surface is a hand-rolled
+        lookalike — the real implementation would swap in Monaco with a custom theme that reads
+        your <code>--bg-panel</code>, <code>--border</code>, and accent tokens (none of the
+        variants use <code>vs-dark</code>).<br /><br />
+        Every button, tab, and search box is static — clicking around the app isn't wired up.
+        Focus on the <strong>layout, hierarchy, density, and chrome</strong>, not the
+        interactions. Flip between variants with the banner in the top right of each page.
+      </div>
+    </div>
+    <script src="_shared.js"></script>
+  </body>
+</html>
