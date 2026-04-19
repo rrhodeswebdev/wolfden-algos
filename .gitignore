@@ -39,3 +39,6 @@ algo_runtime/algos/
 
 # Tauri
 src-tauri/target/
+
+# Superpowers brainstorm scratch dir
+.superpowers/
