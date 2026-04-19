@@ -1,3 +1,7 @@
+import { useMemo, useState } from "react";
+import UplotReact from "uplot-react";
+import "uplot/dist/uPlot.min.css";
+import type uPlot from "uplot";
 import type { Algo, AlgoRun, NavOptions, View } from "../types";
 import type { AlgoStats } from "../hooks/useTradingSimulation";
 
@@ -88,6 +92,18 @@ export const HomeView = (props: HomeViewProps) => {
         ? positionSymbols.join(" · ")
         : `${positionSymbols.slice(0, 3).join(" · ")} +${positionSymbols.length - 3}`;
 
+  const [timeRange, setTimeRange] = useState<TimeRange>("today");
+  const [visibleInstanceIds, setVisibleInstanceIds] = useState<Set<string>>(() => new Set(props.activeRuns.map((r) => r.instance_id)));
+
+  const toggleInstanceVisibility = (instanceId: string) => {
+    setVisibleInstanceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(instanceId)) next.delete(instanceId);
+      else next.add(instanceId);
+      return next;
+    });
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-auto bg-[var(--bg-primary)]">
       <div className="max-w-[1400px] w-full mx-auto p-5 flex flex-col gap-4">
@@ -163,8 +179,27 @@ export const HomeView = (props: HomeViewProps) => {
           />
         </div>
 
-        {/* Section 3: Hero P&L chart — filled in Task 7 */}
-        <div id="home-section-chart" />
+        {/* Section 3: Hero P&L chart */}
+        <div id="home-section-chart" className="p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border)]">
+          <div className="flex items-center justify-between mb-3">
+            <button
+              onClick={() => props.onNavigate("trading")}
+              className="group text-[11px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold hover:text-[var(--accent-blue)] transition-colors"
+            >
+              Session P&L
+              <span className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+            </button>
+            <TimeRangeSegmented value={timeRange} onChange={setTimeRange} />
+          </div>
+          <SessionPnlChart
+            pnlHistory={props.pnlHistory}
+            runPnlHistories={props.runPnlHistories}
+            activeRuns={props.activeRuns}
+            algos={props.algos}
+            visibleInstanceIds={visibleInstanceIds}
+            onToggleInstance={toggleInstanceVisibility}
+          />
+        </div>
 
         {/* Section 4: Bottom split (algos tape + performance) — filled in Tasks 8 & 9 */}
         <div id="home-section-bottom" className="grid grid-cols-3 gap-4">
@@ -261,4 +296,138 @@ const KpiCard = ({ label, value, valueColor, detail, sparkline, onClick }: KpiCa
       );
     })() : null}
   </button>
+);
+
+const CHART_PALETTE = ["#e5e7eb", "#22c55e", "#60a5fa", "#f59e0b", "#a78bfa", "#f472b6", "#34d399", "#fb923c"];
+
+type SessionPnlChartProps = {
+  pnlHistory: number[];
+  runPnlHistories: Record<string, number[]>;
+  activeRuns: AlgoRun[];
+  algos: Algo[];
+  visibleInstanceIds: Set<string>;
+  onToggleInstance: (instanceId: string) => void;
+};
+
+const SessionPnlChart = ({ pnlHistory, runPnlHistories, activeRuns, algos, visibleInstanceIds, onToggleInstance }: SessionPnlChartProps) => {
+  const instances = activeRuns.filter((r) => runPnlHistories[r.instance_id]?.length);
+
+  const data = useMemo<uPlot.AlignedData>(() => {
+    const length = Math.max(pnlHistory.length, ...instances.map((r) => runPnlHistories[r.instance_id]?.length ?? 0), 1);
+    const x = Array.from({ length }, (_, i) => i);
+    const totalSeries = Array.from({ length }, (_, i) => pnlHistory[i] ?? pnlHistory[pnlHistory.length - 1] ?? 0);
+    const perRun = instances.map((r) => {
+      const h = runPnlHistories[r.instance_id] ?? [];
+      return Array.from({ length }, (_, i) => h[i] ?? h[h.length - 1] ?? 0);
+    });
+    return [x, totalSeries, ...perRun] as uPlot.AlignedData;
+  }, [pnlHistory, runPnlHistories, instances]);
+
+  const options = useMemo<uPlot.Options>(() => ({
+    width: 800,
+    height: 220,
+    cursor: { drag: { x: false, y: false } },
+    legend: { show: false },
+    scales: { x: { time: false } },
+    axes: [
+      { stroke: "#6b7280", grid: { stroke: "#1a1b1f", width: 1 } },
+      { stroke: "#6b7280", grid: { stroke: "#1a1b1f", width: 1 } },
+    ],
+    series: [
+      {},
+      { label: "Total", stroke: CHART_PALETTE[0], width: 2, fill: "rgba(229,231,235,0.08)" },
+      ...instances.map((r, i) => ({
+        label: algos.find((a) => a.id === r.algo_id)?.name ?? `algo ${r.algo_id}`,
+        stroke: CHART_PALETTE[(i + 1) % CHART_PALETTE.length],
+        width: 1.5,
+        show: visibleInstanceIds.has(r.instance_id),
+      })),
+    ],
+  }), [instances, algos, visibleInstanceIds]);
+
+  if (pnlHistory.length <= 1) {
+    return (
+      <div className="h-[220px] flex items-center justify-center text-sm text-[var(--text-secondary)] border border-dashed border-[var(--border)] rounded-lg">
+        No session activity yet
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap gap-3 mb-3">
+        <LegendItem color={CHART_PALETTE[0]} label="Total" visible={true} onClick={() => undefined} disabledToggle />
+        {instances.map((r, i) => {
+          const algoName = algos.find((a) => a.id === r.algo_id)?.name ?? `algo ${r.algo_id}`;
+          return (
+            <LegendItem
+              key={r.instance_id}
+              color={CHART_PALETTE[(i + 1) % CHART_PALETTE.length]}
+              label={algoName}
+              visible={visibleInstanceIds.has(r.instance_id)}
+              onClick={() => onToggleInstance(r.instance_id)}
+            />
+          );
+        })}
+      </div>
+      <div className="w-full overflow-hidden">
+        <UplotReact options={options} data={data} />
+      </div>
+    </>
+  );
+};
+
+type LegendItemProps = {
+  color: string;
+  label: string;
+  visible: boolean;
+  onClick: () => void;
+  disabledToggle?: boolean;
+};
+
+const LegendItem = ({ color, label, visible, onClick, disabledToggle }: LegendItemProps) => (
+  <button
+    onClick={disabledToggle ? undefined : onClick}
+    disabled={disabledToggle}
+    className={`flex items-center gap-2 text-xs px-2 py-1 rounded transition-opacity ${disabledToggle ? "cursor-default" : "hover:bg-[var(--bg-panel)]"} ${visible ? "opacity-100" : "opacity-40 line-through"}`}
+  >
+    <span className="w-3 h-0.5 rounded" style={{ backgroundColor: color }} />
+    <span className="text-[var(--text-primary)]">{label}</span>
+  </button>
+);
+
+type TimeRange = "1h" | "today" | "week" | "mtd";
+
+type SegmentedProps = {
+  value: TimeRange;
+  onChange: (v: TimeRange) => void;
+};
+
+const TIME_RANGE_OPTIONS: { value: TimeRange; label: string; enabled: boolean }[] = [
+  { value: "1h", label: "1h", enabled: false },
+  { value: "today", label: "Today", enabled: true },
+  { value: "week", label: "Week", enabled: false },
+  { value: "mtd", label: "MTD", enabled: false },
+];
+
+const TimeRangeSegmented = ({ value, onChange }: SegmentedProps) => (
+  <div className="flex bg-[var(--bg-secondary)] border border-[var(--border)] rounded-md overflow-hidden">
+    {TIME_RANGE_OPTIONS.map((opt) => (
+      <button
+        key={opt.value}
+        disabled={!opt.enabled}
+        onClick={() => opt.enabled && onChange(opt.value)}
+        className={`px-2.5 py-1 text-[11px] transition-colors ${
+          value === opt.value
+            ? "bg-[var(--bg-panel)] text-[var(--text-primary)]"
+            : opt.enabled
+              ? "text-[var(--text-secondary)] hover:bg-[var(--bg-panel)]"
+              : "text-[var(--text-secondary)] opacity-40 cursor-not-allowed"
+        }`}
+        title={opt.enabled ? "" : "Coming soon"}
+      >
+        {opt.label}
+      </button>
+    ))}
+  </div>
 );
