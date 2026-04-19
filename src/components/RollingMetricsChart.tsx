@@ -15,10 +15,21 @@ const PICKERS: { id: RollingMetric; label: string }[] = [
 
 export const RollingMetricsChart = ({ sharpe, winRate, expectancy }: RollingMetricsChartProps) => {
   const [metric, setMetric] = useState<RollingMetric>("sharpe");
+  // Resize tick — bumped by the ResizeObserver so the draw effect re-runs when the
+  // container's width changes (tab switches, window resizes, first-paint race).
+  const [resizeTick, setResizeTick] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const series = metric === "sharpe" ? sharpe : metric === "winRate" ? winRate : expectancy;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => setResizeTick((t) => t + 1));
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -89,7 +100,7 @@ export const RollingMetricsChart = ({ sharpe, winRate, expectancy }: RollingMetr
     ctx.arc(lx, ly, 3, 0, Math.PI * 2);
     ctx.fillStyle = lastVal >= 0 ? "#00d68f" : "#ff4d6a";
     ctx.fill();
-  }, [series]);
+  }, [series, resizeTick]);
 
   const partialWindowNotice =
     series.length > 0 && series[0].windowSize < 20
