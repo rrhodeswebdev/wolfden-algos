@@ -199,21 +199,20 @@ No changes to `NavOptions` or `App.tsx` routing — these cases are already supp
 
 ## Testing Strategy
 
-Pure logic is covered with unit tests; UI wiring with React Testing Library equivalents or visual verification, per the project's existing pattern.
+The project has no test runner configured. Verification follows the convention used by the Home and Editor redesigns:
 
-- `src/lib/algoInstanceView.test.ts`:
-  - Chart grouping: orders groups by `dataSources` order; empty chart group suppressed when None is selected.
-  - Algo grouping: orders groups by algo name; halted instances sort to end of their group.
-  - Aggregate P&L: sums correctly; returns 0 for empty groups.
-  - Filtering: mode, status, and search each include/exclude correctly; combined filters AND together.
-- Visual / behavioral verification (manual):
-  - Selecting a row updates the detail panel.
-  - Slide-over opens, prefills from group-header `+ add`, cancels cleanly.
-  - Deep-link buttons invoke `onNavigate` with the expected arguments.
-  - Empty states render under each condition.
+- **Type-check**: `npx tsc --noEmit` must pass after each task.
+- **Manual smoke** against a running `npm run dev`, covering:
+  - Selecting a row updates the detail panel (stats, logs, errors, config tabs).
+  - Group-by toggle reshapes groups correctly for Chart / Algo / None.
+  - Mode, status, and search filters combine correctly; "No results" message appears when they exclude everything.
+  - Slide-over launcher: Run new algo (top bar) opens empty; group-header `+ add` prefills; Cancel / Esc / scrim dismiss; Start fires `onStartAlgo` and the new instance appears.
+  - Deep-link buttons invoke `onNavigate` with the expected view and options (verifiable by navigating and observing target-view state).
+  - Halted instances sort to bottom of group; `Clear` hides row locally.
+  - Empty states render for: no charts, no runs, no matches, no selection.
   - Auto-select on mount continues to honor `initialInstanceId`.
 
-Following the project's convention, no mocked hooks — tests exercise pure helpers with fixture data.
+The pure helpers in `src/lib/algoInstanceView.ts` are designed to be verifiable by inspection and through the manual smoke cases above. If unit tests are added later, they slot into these helpers cleanly.
 
 ## Implementation Notes
 
