@@ -57,6 +57,13 @@ type HomeViewProps = {
 export const HomeView = (props: HomeViewProps) => {
   const accountCount = Object.keys(props.accounts).length;
   const runningCount = props.activeRuns.length;
+  const accountNames = Object.keys(props.accounts);
+  const accountPositionCount = (accountName: string) =>
+    props.positions.filter((p) => p.account === accountName).length;
+  const accountLivePnl = (accountName: string) =>
+    props.positions.filter((p) => p.account === accountName).reduce((sum, p) => sum + p.targetPnl, 0);
+  const accountIsActive = (accountName: string) =>
+    props.activeRuns.some((r) => r.account === accountName);
   const connectionLabel =
     props.connectionStatus === "connected"
       ? `Connected to NinjaTrader · ${accountCount} account${accountCount === 1 ? "" : "s"} · ${runningCount} algo${runningCount === 1 ? "" : "s"} running`
@@ -82,8 +89,38 @@ export const HomeView = (props: HomeViewProps) => {
           </div>
         </div>
 
-        {/* Section 1: Account strip — filled in Task 5 */}
-        <div id="home-section-accounts" />
+        {/* Section 1: Account strip */}
+        <div id="home-section-accounts">
+          {accountNames.length === 0 ? (
+            <div className="p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border)] text-sm text-[var(--text-secondary)]">
+              No accounts connected
+            </div>
+          ) : (
+            <div className={`grid gap-3 ${
+              accountNames.length === 1 ? "grid-cols-1" :
+              accountNames.length === 2 ? "grid-cols-2" :
+              accountNames.length === 3 ? "grid-cols-3" :
+              "grid-cols-4 overflow-x-auto"
+            }`}>
+              {accountNames.map((name) => {
+                const data = props.accounts[name];
+                const balance = data.cash || data.buying_power;
+                const dayPnl = data.realized_pnl + accountLivePnl(name);
+                return (
+                  <AccountCard
+                    key={name}
+                    name={name}
+                    balance={balance}
+                    dayPnl={dayPnl}
+                    positionCount={accountPositionCount(name)}
+                    isActive={accountIsActive(name)}
+                    onClick={() => props.onNavigate("trading", { accountFilter: name })}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Section 2: KPI row — filled in Task 6 */}
         <div id="home-section-kpis" />
@@ -100,3 +137,52 @@ export const HomeView = (props: HomeViewProps) => {
     </div>
   );
 };
+
+const formatPnl = (value: number): string => {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const pnlColorClass = (value: number): string =>
+  value > 0 ? "text-[var(--accent-green)]" : value < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]";
+
+type AccountCardProps = {
+  name: string;
+  balance: number;
+  dayPnl: number;
+  positionCount: number;
+  isActive: boolean;
+  onClick: () => void;
+};
+
+const AccountCard = ({ name, balance, dayPnl, positionCount, isActive, onClick }: AccountCardProps) => (
+  <button
+    onClick={onClick}
+    className="group text-left p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border)] hover:border-[var(--accent-blue)] hover:bg-[var(--bg-secondary)] transition-colors cursor-pointer"
+  >
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-[var(--accent-green)]" : "bg-[var(--border)]"}`} />
+        <span className="text-sm font-medium">{name}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] uppercase text-[var(--text-secondary)] tracking-wider">NinjaTrader</span>
+        <span className="text-[var(--accent-blue)] text-sm opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+      </div>
+    </div>
+    <div className="grid grid-cols-3 gap-3">
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Balance</div>
+        <div className="text-sm font-medium">${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Day P&L</div>
+        <div className={`text-sm font-medium ${pnlColorClass(dayPnl)}`}>{dayPnl !== 0 ? formatPnl(dayPnl) : "$0.00"}</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] mb-1">Positions</div>
+        <div className="text-sm font-medium">{positionCount}</div>
+      </div>
+    </div>
+  </button>
+);
