@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import UplotReact from "uplot-react";
 import "uplot/dist/uPlot.min.css";
 import type uPlot from "uplot";
@@ -203,7 +203,59 @@ export const HomeView = (props: HomeViewProps) => {
 
         {/* Section 4: Bottom split (algos tape + performance) — filled in Tasks 8 & 9 */}
         <div id="home-section-bottom" className="grid grid-cols-3 gap-4">
-          <div id="home-section-algos" className="col-span-2" />
+          <div id="home-section-algos" className="col-span-2 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border)]">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold">Active Algos</span>
+              <button
+                onClick={() => props.onNavigate("algos")}
+                className="text-[11px] text-[var(--accent-blue)] hover:underline"
+              >
+                View all →
+              </button>
+            </div>
+            {props.activeRuns.length === 0 ? (
+              <div className="text-sm text-[var(--text-secondary)] py-6 text-center">
+                No algos running — start one from the Algos view
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">Algo</th>
+                    <th className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">Mode</th>
+                    <th className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">Account</th>
+                    <th className="text-right px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">P&L</th>
+                    <th className="text-right px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">Trades</th>
+                    <th className="text-right px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">Win %</th>
+                    <th className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-medium">Trend</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {props.activeRuns.map((run) => {
+                    const algo = props.algos.find((a) => a.id === run.algo_id);
+                    const stats = props.algoStats[run.instance_id];
+                    const history = props.runPnlHistories[run.instance_id] ?? [];
+                    return (
+                      <AlgoTapeRow
+                        key={run.instance_id}
+                        instanceId={run.instance_id}
+                        algoName={algo?.name ?? `algo ${run.algo_id}`}
+                        mode={run.mode}
+                        account={run.account}
+                        pnl={stats?.pnl ?? 0}
+                        trades={stats?.totalTrades ?? 0}
+                        winRate={stats?.winRate ?? 0}
+                        history={history}
+                        onClickRow={() => props.onNavigate("algos", { instanceId: run.instance_id })}
+                        onStop={() => props.onStopAlgo(run.instance_id)}
+                      />
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
           <div id="home-section-performance" className="col-span-1" />
         </div>
       </div>
@@ -434,3 +486,79 @@ const TimeRangeSegmented = ({ value, onChange }: SegmentedProps) => (
     ))}
   </div>
 );
+
+type AlgoTapeRowProps = {
+  instanceId: string;
+  algoName: string;
+  mode: string;
+  account: string;
+  pnl: number;
+  trades: number;
+  winRate: number;
+  history: number[];
+  onClickRow: () => void;
+  onStop: () => void;
+};
+
+const AlgoTapeRow = ({ instanceId: _id, algoName, mode, account, pnl, trades, winRate, history, onClickRow, onStop }: AlgoTapeRowProps) => {
+  const modePill =
+    mode === "live"
+      ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
+      : "bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]";
+
+  const handleStop = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    onStop();
+  };
+
+  const sparkline = (() => {
+    if (history.length <= 1) return null;
+    const min = Math.min(...history);
+    const max = Math.max(...history);
+    const range = max - min || 1;
+    const points = history.map((v, i) => `${i},${16 - ((v - min) / range) * 14}`).join(" ");
+    return (
+      <svg viewBox={`0 0 ${history.length} 18`} preserveAspectRatio="none" className="w-16 h-4">
+        <polyline
+          fill="none"
+          stroke={pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)"}
+          strokeWidth="1.2"
+          points={points}
+        />
+      </svg>
+    );
+  })();
+
+  return (
+    <tr
+      onClick={onClickRow}
+      className="group border-t border-[var(--border)] hover:bg-[var(--bg-secondary)] transition-colors cursor-pointer"
+    >
+      <td className="px-3 py-2 text-sm">
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full ${mode === "live" ? "bg-[var(--accent-green)]" : "bg-[var(--accent-yellow)]"}`} />
+          <span className="font-medium">{algoName}</span>
+        </div>
+      </td>
+      <td className="px-3 py-2">
+        <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded ${modePill}`}>{mode}</span>
+      </td>
+      <td className="px-3 py-2 text-sm text-[var(--text-secondary)]">{account}</td>
+      <td className={`px-3 py-2 text-sm text-right font-medium tabular-nums ${pnlColorClass(pnl)}`}>{formatPnl(pnl)}</td>
+      <td className="px-3 py-2 text-sm text-right tabular-nums">{trades}</td>
+      <td className="px-3 py-2 text-sm text-right tabular-nums">{trades > 0 ? `${winRate}%` : "—"}</td>
+      <td className="px-3 py-2">
+        {sparkline ?? <span className="text-[var(--text-secondary)] text-xs">—</span>}
+      </td>
+      <td className="px-3 py-2 text-right">
+        <button
+          onClick={handleStop}
+          className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--accent-red)] hover:text-[var(--accent-red)] transition-all"
+          title="Stop this algo"
+        >
+          Stop
+        </button>
+      </td>
+    </tr>
+  );
+};
