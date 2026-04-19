@@ -401,6 +401,7 @@ export const App = () => {
             dataSources={dataSources}
             activeRuns={activeRuns}
             algoStats={simulation.algoStats}
+            runPnlHistories={simulation.runPnlHistories}
             errorsByInstance={errorsByInstance}
             logsByInstance={logsByInstance}
             healthByInstance={healthByInstance}
@@ -411,6 +412,7 @@ export const App = () => {
             aiTerminalAlgoIds={aiTerminalAlgoIds}
             initialInstanceId={pendingNavContext?.targetView === "algos" ? pendingNavContext.instanceId : null}
             onInstanceFocused={clearPendingNavContext}
+            onNavigate={handleNavigate}
           />
         )}
 
