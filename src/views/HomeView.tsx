@@ -256,7 +256,56 @@ export const HomeView = (props: HomeViewProps) => {
               </table>
             )}
           </div>
-          <div id="home-section-performance" className="col-span-1" />
+          <div id="home-section-performance" className="col-span-1 p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border)]">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold">Performance</span>
+              <button
+                onClick={() => props.onNavigate("trading", { scrollTo: "stats" })}
+                className="text-[11px] text-[var(--accent-blue)] hover:underline"
+              >
+                Full stats →
+              </button>
+            </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold mb-1">Quality</div>
+                <StatRow label="Profit Factor" value={props.stats.profitFactor} />
+                <StatRow label="Sharpe" value={props.stats.sharpe} />
+                <StatRow
+                  label="Max Drawdown"
+                  value={props.stats.totalTrades > 0 ? formatPnl(props.stats.maxDrawdown) : "—"}
+                  valueColor={props.stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined}
+                />
+              </div>
+              <div className="border-t border-[var(--border)] pt-3">
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold mb-1">Trades</div>
+                <StatRow
+                  label="Avg Win"
+                  value={props.stats.totalTrades > 0 ? formatPnl(props.stats.avgWin) : "—"}
+                  valueColor={props.stats.totalTrades > 0 ? "text-[var(--accent-green)]" : undefined}
+                />
+                <StatRow
+                  label="Avg Loss"
+                  value={props.stats.totalTrades > 0 ? formatPnl(props.stats.avgLoss) : "—"}
+                  valueColor={props.stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined}
+                />
+                <StatRow label="Avg Duration" value={props.stats.avgTradeDuration || "—"} />
+              </div>
+              <div className="border-t border-[var(--border)] pt-3">
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold mb-1">Streaks</div>
+                <StatRow
+                  label="Consecutive W"
+                  value={props.stats.totalTrades > 0 ? `${props.stats.consecutiveWins}` : "—"}
+                  valueColor={props.stats.totalTrades > 0 ? "text-[var(--accent-green)]" : undefined}
+                />
+                <StatRow
+                  label="Consecutive L"
+                  value={props.stats.totalTrades > 0 ? `${props.stats.consecutiveLosses}` : "—"}
+                  valueColor={props.stats.totalTrades > 0 ? "text-[var(--accent-red)]" : undefined}
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -562,3 +611,16 @@ const AlgoTapeRow = ({ instanceId: _id, algoName, mode, account, pnl, trades, wi
     </tr>
   );
 };
+
+type StatRowProps = {
+  label: string;
+  value: string;
+  valueColor?: string;
+};
+
+const StatRow = ({ label, value, valueColor }: StatRowProps) => (
+  <div className="flex items-center justify-between py-1 text-sm">
+    <span className="text-[var(--text-secondary)]">{label}</span>
+    <span className={`font-medium tabular-nums ${valueColor ?? ""}`}>{value}</span>
+  </div>
+);
