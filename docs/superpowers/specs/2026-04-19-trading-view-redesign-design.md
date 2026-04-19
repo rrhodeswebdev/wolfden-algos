@@ -8,7 +8,7 @@
 
 Replace today's single-surface TradingView (mode toggle + chart/account/algo filters, P&L hero, one equity chart, positions table, orders table) with a unified dashboard designed to serve both the "live monitor" and "performance analytics" mental models without a mode switch. A pinned hero (KPIs + equity curve with drawdown overlay) and a global Chart/Account/Algo filter bar remain visible at all times. Four tabs below group the rest: **Live** (open position cards, risk/exposure summary, order tape), **Performance** (per-algo, per-symbol, per-account breakdowns, live-vs-shadow delta), **Analytics** (trade P&L distribution, hour×day heatmap, rolling metrics), and **Trades** (roundtrips table with a right-side drill-down panel showing execution and MAE/MFE). The live/shadow mode toggle is removed; shadow data renders inline tagged with a `Shadow` pill, and the dedicated live-vs-shadow delta module in Performance makes the comparison direct.
 
-The work extends the simulation layer: the existing `useTradingSimulation` shrinks to live positions + orders, and new sibling hooks (`useTradeHistory`, `useEquityTimeline`, `useRollingMetrics`) own roundtrip pairing, timestamped equity series, and windowed metrics. MAE/MFE are derived by sampling `position.unrealized_pnl` while a position is open. All data flows from events today's hook already listens to — no backend, Rust, or Tauri-command changes.
+The work extends the simulation layer additively. `useTradingSimulation` keeps its existing outputs intact (`HomeView` and `AlgosView` depend on them). Three new sibling hooks sit alongside it: `useTradeHistory` (roundtrip pairing + per-{algo,symbol,account} aggregates + distribution + heatmap buckets), `useEquityTimeline` (timestamped equity + drawdown derivation), and `useRollingMetrics` (windowed Sharpe / win% / expectancy). Only `TradingView` consumes the new hooks. MAE/MFE are derived by sampling `position.unrealized_pnl` while a position is open. All data flows from events today's hook already listens to — no backend, Rust, or Tauri-command changes.
 
 ## Goals
 
@@ -38,8 +38,7 @@ The work extends the simulation layer: the existing `useTradingSimulation` shrin
 
 - Rewrite of `src/views/TradingView.tsx` into an orchestrator (filter bar + hero + tabs + detail panel).
 - New view-layer components (listed below under Architecture).
-- Hook restructuring:
-  - `src/hooks/useTradingSimulation.ts` reduces to live positions + orders + account + live session equity (current behavior minus completed-trade and shadow-history concerns).
+- Hook additions (additive only — `useTradingSimulation` output contract is unchanged):
   - `src/hooks/useTradeHistory.ts` — new, owns roundtrip pairing and aggregate breakdowns.
   - `src/hooks/useEquityTimeline.ts` — new, owns timestamped equity series and drawdown derivation.
   - `src/hooks/useRollingMetrics.ts` — new, owns windowed metric series.
@@ -65,7 +64,7 @@ The work extends the simulation layer: the existing `useTradingSimulation` shrin
 ```
 src/
   hooks/
-    useTradingSimulation.ts     [reduce]  — positions + orders + live account state
+    useTradingSimulation.ts     [unchanged] — HomeView / AlgosView continue to consume it as-is
     useTradeHistory.ts          [new]     — roundtrips + per-{algo,symbol,account} aggregates + distribution + heatmap buckets
     useEquityTimeline.ts        [new]     — timestamped equity (live + shadow) + drawdown series
     useRollingMetrics.ts        [new]     — windowed Sharpe / win% / expectancy
@@ -101,16 +100,18 @@ src/
 
 | Hook | Subscribes to | Owns | Emits |
 |---|---|---|---|
-| `useTradingSimulation` | `nt-position`, `nt-order-update`, `nt-account`, `nt-chart-removed` | Live positions, orders (last 200), live-session equity (points only, retained for backwards compatibility during the transition), accounts | `positions`, `orders`, `accounts`, `liveStats` |
+| `useTradingSimulation` | unchanged | Live positions, orders, untimestamped `pnlHistory` / `runPnlHistories`, `algoStats`, `stats`, `shadowStats` — as today | unchanged — consumed by HomeView / AlgosView as-is, and by TradingView for live positions / orders / accounts |
 | `useTradeHistory` | `nt-position` (for pairing + unrealized-P&L sampling), `nt-order-update` (for fill prices / times), `nt-chart-removed` | `Roundtrip[]` (cap 1000), per-algo/symbol/account aggregates, distribution buckets, hour×day buckets | `roundtrips`, `byAlgo`, `bySymbol`, `byAccount`, `liveVsShadow`, `distribution`, `heatmap` |
 | `useEquityTimeline` | `nt-account`, roundtrip closes from `useTradeHistory` | Timestamped equity per series (`live`, `shadow`), running peak + underwater series | `{ live: EquityPoint[], shadow: EquityPoint[], drawdown: DrawdownPoint[] }` |
 | `useRollingMetrics` | `roundtrips` (from `useTradeHistory`) | Windowed derivation (default window = 20 trades) | `{ sharpe: number[], winRate: number[], expectancy: number[] }` + the roundtrip-close timestamps for x-axis labelling |
 
-`useTradeHistory` sources `algo` and `instanceId` by joining `algoId` / `instance_id` against the `algos` and `activeRuns` the view receives — same join the existing hook performs inside `computeStats` today.
+Both `useTradingSimulation` and `useTradeHistory` subscribe to the same `nt-position` / `nt-order-update` event stream; they maintain independent state, which is fine — React event listeners are cheap, and keeping state independent preserves the hook's focused responsibility.
+
+`useTradeHistory` sources `algo` and `instanceId` by joining `algoId` / `instance_id` against the `algos` and `activeRuns` the view receives — the same join `useTradingSimulation` performs inside `computeStats` today.
 
 ### Raw data → enriched roundtrip
 
-`useTradingSimulation` today already tracks an unrealized-P&L per `posKey` via `positionPnlRef` and records a `{ pnl }` entry into `completedTrades` on position flat. The new `useTradeHistory` subsumes and extends this:
+`useTradingSimulation` today tracks per-position unrealized P&L via `positionPnlRef` and records a `{ pnl }` entry into its internal `completedTrades` on position flat. `useTradeHistory` runs the same pattern independently with a richer record — the two do not share state:
 
 - On the first `nt-position` for a `posKey` with a non-zero qty, record `openTimestamp` (now), `entryPrice` (`p.avg_price`), `side`, `qty`, `symbol`, `account`, `dataSourceId`, and the matching algo/instance from `activeRuns`.
 - While the position is open, maintain `mae` (most-negative unrealized P&L seen) and `mfe` (most-positive). Sample via a ~250ms RAF tick bound to the position being open; reset on flat.
@@ -279,7 +280,7 @@ Pure helpers in `src/lib/tradingView.ts` and `src/lib/roundtrips.ts` are designe
 
 ## Implementation notes
 
-- `App.tsx` composes the new hooks the same way it composes the existing ones. The hook outputs fan out as props into `TradingView`.
+- `App.tsx` composes the new hooks the same way it composes the existing ones and fans their outputs into `TradingView` as new props. The existing `simulation` prop to `TradingView`, `HomeView`, and `AlgosView` is unchanged.
 - Reuse `useEquityTimeline` in the hero's `EquityChart` — the drawdown overlay reads from the same series; no secondary computation in the chart component.
 - `useTradeHistory` and `useTradingSimulation` must not race: the roundtrip-close-triggered equity update and the `nt-account` realized-P&L update can arrive in either order. `useEquityTimeline` resolves by keying on timestamp and using the most-recent account snapshot when one arrives.
 - MAE/MFE sampling uses a single shared `requestAnimationFrame` loop inside `useTradeHistory`, throttled by a ~250ms accumulator — only one RAF is alive regardless of how many positions are open.
@@ -295,7 +296,8 @@ Pure helpers in `src/lib/tradingView.ts` and `src/lib/roundtrips.ts` are designe
 - **Shadow slippage estimate.** `liveAvg − shadowAvg` is crude; anything more requires paired trade IDs the bridge does not expose. Ship the crude estimate and label it clearly ("est.").
 - **Rolling metrics window with sparse trades.** Early in a session the window is smaller than the target size. Show partial-window values with an indicator ("n/20 trades") rather than hiding.
 - **Drawdown overlay visual clarity.** Overlaid on the same axis as equity, the DD band can muddy the line at small scales. Implementation plan to validate this during layout and add a subtle separator / secondary axis if needed.
-- **`useTradingSimulation` reduction may affect HomeView / AlgosView.** Both consume the hook today. The reduction keeps all fields currently consumed by those views; anything removed from the hook must be verified against their usages before the PR lands.
+- **`useTradingSimulation` output contract is unchanged, by choice.** HomeView and AlgosView consume its `pnlHistory` / `runPnlHistories` / `algoStats` / `stats` today. Keeping the hook's outputs stable avoids cascading changes into those views. The tradeoff is two hooks subscribing to the same `nt-position` / `nt-order-update` streams (each maintaining independent state) — acceptable. A future cleanup pass can consolidate once `useEquityTimeline` is the preferred equity source across all views.
+- **Duplicated event subscriptions.** `useTradingSimulation` and `useTradeHistory` both listen to `nt-position` / `nt-order-update`. Both must remain internally consistent with each other — e.g. when a position flips flat, both hooks should reach the same conclusion about the trade's final P&L. The risk is isolated to bugs in either hook; the event stream is the same.
 
 ## References
 
