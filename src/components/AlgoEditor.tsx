@@ -66,11 +66,11 @@ export const AlgoEditor = ({
 
   return (
     <div
-      className="flex flex-col h-full"
+      className="flex flex-col h-full min-h-0"
       onKeyDown={handleKeyDown as unknown as React.KeyboardEventHandler}
     >
       {showDeps && (
-        <div className="px-4 py-3 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+        <div className="px-4 py-3 border-b border-[var(--border)] bg-[var(--bg-secondary)] flex-shrink-0">
           <label className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold block mb-1.5">
             Pip Dependencies
           </label>
@@ -86,7 +86,7 @@ export const AlgoEditor = ({
           </p>
         </div>
       )}
-      <div className="flex-1 p-0.5">
+      <div className="flex-1 min-h-0 p-0.5">
         <Editor
           height="100%"
           defaultLanguage="python"

@@ -96,8 +96,9 @@ export const EditorView = ({
           activeTabId={activeTabId}
           onSelect={(id) => tabs.switchTab(id)}
           onClose={onRequestCloseTab}
-          onCreateAlgo={onCreateAlgo}
-          onCreateAlgoWithAi={onCreateAlgoWithAi}
+          onOpenAiTerminalForActive={() => {
+            if (activeTabId !== null) onOpenAiTerminal(activeTabId);
+          }}
           onRenameActive={onRenameActiveAlgo}
           onDeleteActive={handleDeleteActive}
           onCloseOthers={handleCloseOthers}

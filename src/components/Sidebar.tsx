@@ -40,7 +40,7 @@ export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarPro
         : "Waiting for NinjaTrader...";
 
   return (
-    <div className="relative flex flex-col w-[52px] bg-[var(--bg-secondary)] border-r border-[var(--border)] select-none">
+    <div className="flex flex-col w-[52px] bg-[var(--bg-secondary)] border-r border-[var(--border)] select-none">
       {/* Logo */}
       <div className="flex items-center justify-center h-12 border-b border-[var(--border)] p-1.5">
         <img src="/wolf-den-logo.svg" alt="Wolf Den" className="w-8 h-8 object-contain" />
@@ -64,8 +64,8 @@ export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarPro
         ))}
       </nav>
 
-      {/* Guide (bottom) */}
-      <div className="flex flex-col items-center pb-2 gap-1">
+      {/* Guide + Connection Status (bottom, centered) */}
+      <div className="flex flex-col items-center pb-3 gap-2">
         <button
           onClick={openGuideWindow}
           title="Guide"
@@ -73,19 +73,17 @@ export const Sidebar = ({ activeView, onNavigate, connectionStatus }: SidebarPro
         >
           <span className="text-base leading-none">?</span>
         </button>
+        <div
+          title={statusTitle}
+          className={`w-2 h-2 rounded-full ${
+            connectionStatus === "connected"
+              ? "bg-[var(--accent-green)]"
+              : connectionStatus === "error"
+                ? "bg-[var(--accent-red)]"
+                : "bg-[var(--accent-yellow)] animate-pulse"
+          }`}
+        />
       </div>
-
-      {/* Connection Status — bottom-right corner */}
-      <div
-        title={statusTitle}
-        className={`absolute bottom-2 right-2 w-2 h-2 rounded-full ${
-          connectionStatus === "connected"
-            ? "bg-[var(--accent-green)]"
-            : connectionStatus === "error"
-              ? "bg-[var(--accent-red)]"
-              : "bg-[var(--accent-yellow)] animate-pulse"
-        }`}
-      />
     </div>
   );
 };

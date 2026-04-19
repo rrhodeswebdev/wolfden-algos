@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Plus, Sparkles, X } from "lucide-react";
+import { MoreHorizontal, Sparkles, X } from "lucide-react";
 
 export type EditorTab = {
   id: number;
@@ -13,8 +13,7 @@ type EditorTabsProps = {
   activeTabId: number | null;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
-  onCreateAlgo: () => void;
-  onCreateAlgoWithAi: () => void;
+  onOpenAiTerminalForActive: () => void;
   onRenameActive: () => void;
   onDeleteActive: () => void;
   onCloseOthers: (id: number) => void;
@@ -26,13 +25,14 @@ export const EditorTabs = ({
   activeTabId,
   onSelect,
   onClose,
-  onCreateAlgo,
-  onCreateAlgoWithAi,
+  onOpenAiTerminalForActive,
   onRenameActive,
   onDeleteActive,
   onCloseOthers,
   onCloseAll,
 }: EditorTabsProps) => {
+  const activeTab = activeTabId !== null ? tabs.find((t) => t.id === activeTabId) : null;
+  const activeHasAiTerminal = activeTab?.hasAiTerminal ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -103,16 +103,16 @@ export const EditorTabs = ({
 
       <div className="flex items-center gap-1 px-2 flex-shrink-0 border-l border-[var(--border)]">
         <button
-          onClick={onCreateAlgo}
-          className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel)] transition-colors"
-          title="New algo"
-        >
-          <Plus size={14} />
-        </button>
-        <button
-          onClick={onCreateAlgoWithAi}
-          className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--text-secondary)] hover:text-[var(--accent-blue)] hover:bg-[var(--bg-panel)] transition-colors"
-          title="New algo with AI"
+          onClick={onOpenAiTerminalForActive}
+          disabled={activeTabId === null || activeHasAiTerminal}
+          className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--text-secondary)] hover:text-[var(--accent-blue)] hover:bg-[var(--bg-panel)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[var(--text-secondary)] disabled:hover:bg-transparent"
+          title={
+            activeTabId === null
+              ? "Open AI terminal (select an algo first)"
+              : activeHasAiTerminal
+                ? "AI terminal already open for this algo"
+                : "Open AI terminal for this algo"
+          }
         >
           <Sparkles size={13} />
         </button>
