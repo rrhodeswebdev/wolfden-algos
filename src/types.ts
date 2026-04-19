@@ -19,3 +19,12 @@ export type AlgoRun = {
 };
 
 export type View = "home" | "editor" | "algos" | "trading";
+
+export type NavOptions = {
+  accountFilter?: string;
+  algoFilter?: number;
+  instanceId?: string;
+  scrollTo?: "positions" | "orders" | "history" | "stats";
+};
+
+export type NavContext = NavOptions & { targetView: View };
