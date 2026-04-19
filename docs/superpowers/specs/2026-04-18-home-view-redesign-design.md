@@ -1,7 +1,7 @@
 # Home View Redesign — Design Spec
 
 **Date:** 2026-04-18
-**Status:** Approved
+**Status:** Implemented
 
 ## Overview
 
