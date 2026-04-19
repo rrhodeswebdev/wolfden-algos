@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Variant C · Focus · Editor Prototype</title>
+    <link rel="stylesheet" href="_shared.css" />
+    <style>
+      .app { display: flex; height: 100vh; position: relative; }
+
+      /* Collapsed rail */
+      .rail {
+        width: 44px;
+        flex-shrink: 0;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 14px 0;
+        gap: 10px;
+        position: relative;
+        z-index: 2;
+      }
+      .rail-logo {
+        width: 26px; height: 26px; border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+        display: inline-flex; align-items: center; justify-content: center;
+        font-weight: 800;
+        font-size: 11px;
+        color: #fff;
+      }
+      .rail-count {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        font-size: 10px;
+        color: var(--text-secondary);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-top: 8px;
+        padding: 8px 0;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .rail-count:hover { color: var(--text-primary); }
+      .rail-count .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--accent-yellow);
+        display: inline-block;
+        margin-right: 6px;
+      }
+      .rail-spacer { flex: 1; }
+      .rail-btn {
+        width: 28px; height: 28px;
+        border-radius: 7px;
+        color: var(--text-muted);
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .rail-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+
+      /* Peek panel (simulated always-open for demo) */
+      .peek {
+        position: absolute;
+        left: 44px;
+        top: 0;
+        bottom: 0;
+        width: 280px;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border);
+        box-shadow: 6px 0 40px rgba(0,0,0,0.5);
+        display: flex;
+        flex-direction: column;
+        z-index: 3;
+        transform: translateX(-305px);
+        transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .app:hover .peek,
+      .peek:hover { transform: translateX(0); }
+      .peek-head {
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .peek-title {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .peek-title h2 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .peek-title button {
+        width: 24px; height: 24px;
+        border-radius: 6px;
+        color: var(--accent-blue);
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .peek-title button:hover { background: rgba(77,159,255,0.1); }
+      .search {
+        width: 100%;
+        background: var(--bg-secondary);
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 7px 10px 7px 30px;
+        font-size: 12px;
+        color: var(--text-primary);
+        outline: none;
+        position: relative;
+      }
+      .search-wrap { position: relative; }
+      .search-wrap svg {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+      }
+      .peek-list { flex: 1; overflow: auto; padding: 6px; }
+      .p-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 7px 10px;
+        border-radius: 7px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .p-item:hover { background: var(--bg-secondary); }
+      .p-item.active { background: rgba(77,159,255,0.1); color: var(--text-primary); }
+      .p-item .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .p-item .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--accent-yellow);
+      }
+      .p-item .file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .p-item .meta { font-size: 10px; color: var(--text-muted); }
+
+      /* Main editor area */
+      .stage {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-panel);
+        position: relative;
+        min-width: 0;
+      }
+      .stage-top {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px 24px;
+        border-bottom: 1px solid transparent;
+        position: relative;
+        min-height: 52px;
+      }
+      .title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+      }
+      .title .crumb {
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+      .title .sep { color: var(--border-strong); }
+      .title strong {
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .title .dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--accent-yellow);
+      }
+      .title .pill {
+        padding: 2px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        border-radius: 999px;
+        background: rgba(255,195,0,0.12);
+        color: var(--accent-yellow);
+        text-transform: uppercase;
+      }
+      .stage-top .left-actions,
+      .stage-top .right-actions {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .stage-top .left-actions { left: 20px; }
+      .stage-top .right-actions { right: 20px; }
+      .ghost-btn {
+        padding: 6px 10px;
+        font-size: 11px;
+        color: var(--text-secondary);
+        border-radius: 6px;
+        display: inline-flex; align-items: center; gap: 6px;
+      }
+      .ghost-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+      .ghost-btn kbd {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 0 4px;
+        font-family: inherit;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      .editor-wrap {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .editor-col {
+        width: 100%;
+        max-width: 980px;
+        height: 100%;
+        padding: 0 8px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .editor-surface { flex: 1; padding: 16px 0 40px; }
+
+      /* Floating command palette hint */
+      .palette-fab {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 50;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        border-radius: 10px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+        backdrop-filter: blur(8px);
+      }
+      .palette-fab:hover { color: var(--text-primary); }
+      .palette-fab kbd {
+        padding: 1px 5px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      /* Thin bottom status strip */
+      .status-thin {
+        height: 24px;
+        flex-shrink: 0;
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 20px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .status-thin .group { display: flex; gap: 16px; align-items: center; }
+      .status-thin .saved-state {
+        color: var(--accent-yellow);
+      }
+      .status-thin .saved-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--accent-yellow);
+        display: inline-block;
+        margin-right: 6px;
+      }
+
+      .hover-hint {
+        position: fixed;
+        left: 56px;
+        bottom: 50px;
+        font-size: 10px;
+        color: var(--text-muted);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: var(--bg-elevated);
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        z-index: 40;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <!-- Collapsed rail -->
+      <div class="rail">
+        <div class="rail-logo">W</div>
+        <div class="rail-count">
+          <span class="dot"></span>4 Algos
+        </div>
+        <div class="rail-spacer"></div>
+        <button class="rail-btn" title="Home">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12 12 3l9 9" /><path d="M5 10v10h14V10" /></svg>
+        </button>
+        <button class="rail-btn" title="Runs">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 4 4 5-5" /></svg>
+        </button>
+        <button class="rail-btn" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /></svg>
+        </button>
+      </div>
+
+      <!-- Peek panel (slides in on hover over rail/peek) -->
+      <div class="peek">
+        <div class="peek-head">
+          <div class="peek-title">
+            <h2>Algos</h2>
+            <button>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M12 5v14M5 12h14" /></svg>
+            </button>
+          </div>
+          <div class="search-wrap">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+            <input class="search" placeholder="Find an algo…" />
+          </div>
+        </div>
+        <div class="peek-list">
+          <div class="p-item active">
+            <div class="left">
+              <span class="dot"></span>
+              <span class="file">momentum.py</span>
+            </div>
+            <span class="meta">2m</span>
+          </div>
+          <div class="p-item">
+            <div class="left">
+              <span class="file">mean-reversion.py</span>
+            </div>
+            <span class="meta">1h</span>
+          </div>
+          <div class="p-item">
+            <div class="left">
+              <span class="file">pairs-trade.py</span>
+            </div>
+            <span class="meta">yesterday</span>
+          </div>
+          <div class="p-item">
+            <div class="left">
+              <span class="file">volatility-breakout.py</span>
+            </div>
+            <span class="meta">3d</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage -->
+      <div class="stage">
+        <div class="stage-top">
+          <div class="left-actions">
+            <button class="ghost-btn" title="Expand sidebar">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
+            </button>
+          </div>
+
+          <div class="title">
+            <span class="crumb">Algos</span>
+            <span class="sep">/</span>
+            <strong>momentum.py</strong>
+            <span class="dot" title="Unsaved"></span>
+            <span class="pill">Draft</span>
+          </div>
+
+          <div class="right-actions">
+            <button class="ghost-btn" title="Deps">
+              deps · 3
+            </button>
+            <button class="ghost-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              Backtest
+              <kbd>⌘R</kbd>
+            </button>
+          </div>
+        </div>
+
+        <div class="editor-wrap">
+          <div class="editor-col">
+            <div class="editor-surface" id="editor-surface"></div>
+          </div>
+        </div>
+
+        <div class="status-thin">
+          <div class="group">
+            <span class="saved-state"><span class="saved-dot"></span>Saving…</span>
+            <span>Python 3.11</span>
+          </div>
+          <div class="group">
+            <span>Ln 12, Col 28</span>
+            <span>Spaces 4</span>
+            <span>UTF-8</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hover hint: tells user that peek slides in -->
+    <div class="hover-hint">Hover rail to open algo list</div>
+
+    <!-- Floating palette -->
+    <button class="palette-fab">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+      Quick switch
+      <kbd>⌘K</kbd>
+    </button>
+
+    <script src="_shared.js"></script>
+    <script>
+      renderEditor(document.getElementById("editor-surface"), { activeLine: 12 });
+    </script>
+  </body>
+</html>
