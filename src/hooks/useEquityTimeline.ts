@@ -33,11 +33,11 @@ export type EquityTimeline = {
   shadowDrawdown: DrawdownPoint[];
 };
 
-const INITIAL: EquityPoint[] = [{ t: Date.now(), pnl: 0 }];
+const makeInitial = (): EquityPoint[] => [{ t: Date.now(), pnl: 0 }];
 
 export const useEquityTimeline = (roundtrips: Roundtrip[]): EquityTimeline => {
-  const [live, setLive] = useState<EquityPoint[]>(INITIAL);
-  const [shadow, setShadow] = useState<EquityPoint[]>(INITIAL);
+  const [live, setLive] = useState<EquityPoint[]>(makeInitial);
+  const [shadow, setShadow] = useState<EquityPoint[]>(makeInitial);
   const lastLiveRealizedRef = useRef<number | null>(null);
   const lastShadowCumulativeRef = useRef(0);
   const lastShadowCloseRef = useRef(0);
