@@ -33,6 +33,7 @@ export const AlgoManager = ({
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (editingId !== null && inputRef.current) {
@@ -44,7 +45,10 @@ export const AlgoManager = ({
   useEffect(() => {
     if (menuOpenId === null) return;
     const handler = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) {
+      if (
+        !menuRef.current?.contains(e.target as Node) &&
+        !menuButtonRef.current?.contains(e.target as Node)
+      ) {
         setMenuOpenId(null);
       }
     };
@@ -175,6 +179,7 @@ export const AlgoManager = ({
                 {!isEditing && (
                   <div className="relative flex-shrink-0">
                     <button
+                      ref={menuButtonRef}
                       onClick={(e) => {
                         e.stopPropagation();
                         setMenuOpenId(menuOpen ? null : algo.id);
