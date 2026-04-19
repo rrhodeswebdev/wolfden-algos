@@ -15,6 +15,7 @@ type EditorViewProps = {
   onCreateAlgoWithAi: () => void;
   onOpenAiTerminal: (algoId: number) => void;
   onRequestCloseTab: (id: number) => void;
+  onRequestCloseMany: (ids: number[]) => void;
   onDeleteAlgo: (id: number) => void;
   onRenameAlgo: (id: number, newName: string) => void;
   onSaveAlgo: () => void;
@@ -30,6 +31,7 @@ export const EditorView = ({
   onCreateAlgoWithAi,
   onOpenAiTerminal,
   onRequestCloseTab,
+  onRequestCloseMany,
   onDeleteAlgo,
   onRenameAlgo,
   onSaveAlgo,
@@ -55,15 +57,14 @@ export const EditorView = ({
   const isActiveDirty = activeTabId !== null ? tabs.isDirty(activeTabId) : false;
 
   const handleCloseOthers = (keepId: number) => {
-    for (const id of [...tabs.openTabIds]) {
-      if (id !== keepId) onRequestCloseTab(id);
-    }
+    const ids = tabs.openTabIds.filter((id) => id !== keepId);
+    if (ids.length === 0) return;
+    onRequestCloseMany(ids);
   };
 
   const handleCloseAll = () => {
-    for (const id of [...tabs.openTabIds]) {
-      onRequestCloseTab(id);
-    }
+    if (tabs.openTabIds.length === 0) return;
+    onRequestCloseMany([...tabs.openTabIds]);
   };
 
   const handleDeleteActive = () => {

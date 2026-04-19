@@ -204,6 +204,23 @@ export const App = () => {
     });
   };
 
+  const handleRequestCloseMany = (ids: number[]) => {
+    const dirtyIds = ids.filter((id) => tabs.isDirty(id));
+    if (dirtyIds.length === 0) {
+      for (const id of ids) tabs.forceCloseTab(id);
+      return;
+    }
+    const noun = dirtyIds.length === 1 ? "tab" : "tabs";
+    setConfirmDialog({
+      message: `Close ${dirtyIds.length} ${noun} with unsaved changes?`,
+      confirmLabel: "Close All",
+      onConfirm: () => {
+        for (const id of ids) tabs.forceCloseTab(id);
+        setConfirmDialog(null);
+      },
+    });
+  };
+
   const handleCreateAlgo = async () => {
     try {
       const name = `algo_${Date.now()}`;
@@ -388,6 +405,7 @@ export const App = () => {
             onCreateAlgoWithAi={handleCreateAlgoWithAi}
             onOpenAiTerminal={handleOpenAiTerminal}
             onRequestCloseTab={handleRequestCloseTab}
+            onRequestCloseMany={handleRequestCloseMany}
             onDeleteAlgo={handleDeleteAlgo}
             onRenameAlgo={handleRenameAlgo}
             onSaveAlgo={handleSaveAlgo}

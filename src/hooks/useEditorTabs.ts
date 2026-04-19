@@ -146,6 +146,10 @@ export const useEditorTabs = () => {
     setState((s) => removeTab(s, id));
   }, []);
 
+  // Reads state.buffers via closure (not functional updater) so the caller can
+  // branch on the result synchronously. Tradeoff: a Tauri event arriving during
+  // the micro-gap before tabsRef syncs could read one-render-stale buffers. Accepted
+  // for v1 — narrow window, non-catastrophic outcome.
   const onAlgoExternallyUpdated = useCallback(
     (id: number, code: string, deps: string): ExternalUpdateResult => {
       const b = state.buffers[id];
