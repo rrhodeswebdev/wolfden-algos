@@ -113,16 +113,24 @@ export const TradingView = ({ simulation, algos, activeRuns, initialContext, onC
 
   useEffect(() => {
     if (!initialContext || initialContext.targetView !== "trading") return;
+
     if (initialContext.accountFilter !== undefined) setSelectedAccount(initialContext.accountFilter);
     if (initialContext.algoFilter !== undefined) setSelectedAlgoId(initialContext.algoFilter);
+
+    let rafHandle: number | undefined;
     if (initialContext.scrollTo) {
-      requestAnimationFrame(() => {
+      rafHandle = requestAnimationFrame(() => {
         const scrollTarget = initialContext.scrollTo === "history" ? "orders" : initialContext.scrollTo;
         const el = document.getElementById(`trading-anchor-${scrollTarget}`);
         if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
+
     onContextConsumed?.();
+
+    return () => {
+      if (rafHandle !== undefined) cancelAnimationFrame(rafHandle);
+    };
   }, [initialContext, onContextConsumed]);
 
   const runningAlgos = algos.filter((a) => activeRuns.some((r) => r.algo_id === a.id));
