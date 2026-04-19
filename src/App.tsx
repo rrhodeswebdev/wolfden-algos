@@ -9,6 +9,7 @@ import { AlgosView } from "./views/AlgosView";
 import { TradingView } from "./views/TradingView";
 import { TitleBar } from "./components/TitleBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { RenameDialog } from "./components/RenameDialog";
 import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
@@ -173,6 +174,7 @@ export const App = () => {
   }, []);
 
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
+  const [renameDialog, setRenameDialog] = useState<{ algoId: number; currentName: string } | null>(null);
 
   const handleNavigate = (view: View, options?: NavOptions) => {
     if (view === activeView && !options) return;
@@ -278,10 +280,7 @@ export const App = () => {
     if (activeId === null) return;
     const algo = algos.find((a) => a.id === activeId);
     if (!algo) return;
-    const newName = window.prompt("Rename algo", algo.name);
-    if (newName && newName.trim() && newName.trim() !== algo.name) {
-      handleRenameAlgo(activeId, newName.trim());
-    }
+    setRenameDialog({ algoId: activeId, currentName: algo.name });
   };
 
   const handleDeleteAlgo = (id: number) => {
@@ -473,6 +472,17 @@ export const App = () => {
           confirmLabel={confirmDialog.confirmLabel}
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
+        />
+      )}
+
+      {renameDialog !== null && (
+        <RenameDialog
+          currentName={renameDialog.currentName}
+          onRename={(newName) => {
+            handleRenameAlgo(renameDialog.algoId, newName);
+            setRenameDialog(null);
+          }}
+          onCancel={() => setRenameDialog(null)}
         />
       )}
 
