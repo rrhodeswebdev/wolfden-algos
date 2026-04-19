@@ -424,6 +424,8 @@ export const App = () => {
           onClearLogs={clearLogs}
           onOpenAiTerminal={handleOpenAiTerminal}
           aiTerminalAlgoIds={aiTerminalAlgoIds}
+          initialInstanceId={pendingNavContext?.targetView === "algos" ? pendingNavContext.instanceId : null}
+          onInstanceFocused={clearPendingNavContext}
         />
       )}
 

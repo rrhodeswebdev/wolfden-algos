@@ -19,6 +19,8 @@ type AlgosViewProps = {
   onClearLogs: (instanceId: string) => void;
   onOpenAiTerminal?: (algoId: number) => void;
   aiTerminalAlgoIds?: Set<number>;
+  initialInstanceId?: string | null;
+  onInstanceFocused?: () => void;
 };
 
 const formatDataSource = (ds: DataSource) => {
@@ -369,6 +371,8 @@ export const AlgosView = ({
   onClearLogs,
   onOpenAiTerminal,
   aiTerminalAlgoIds,
+  initialInstanceId,
+  onInstanceFocused,
 }: AlgosViewProps) => {
   const [selectedChartId, setSelectedChartId] = useState<string | null>(null);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
@@ -377,13 +381,25 @@ export const AlgosView = ({
   // Auto-select first running algo on mount
   useEffect(() => {
     if (hasAutoSelected) return;
+    if (initialInstanceId) {
+      const run = activeRuns.find((r) => r.instance_id === initialInstanceId);
+      if (run) {
+        setSelectedChartId(run.data_source_id);
+        setSelectedInstanceId(run.instance_id);
+      }
+      // mark consumed + notify App even if the instance wasn't found,
+      // so stale context doesn't leak into the next navigation
+      setHasAutoSelected(true);
+      onInstanceFocused?.();
+      return;
+    }
     const firstRunning = activeRuns.find((r) => r.status === "running");
     if (firstRunning) {
       setSelectedChartId(firstRunning.data_source_id);
       setSelectedInstanceId(firstRunning.instance_id);
       setHasAutoSelected(true);
     }
-  }, [activeRuns, hasAutoSelected]);
+  }, [activeRuns, hasAutoSelected, initialInstanceId, onInstanceFocused]);
 
   const selectedDs = dataSources.find((ds) => ds.id === selectedChartId) ?? null;
   const chartRuns = selectedChartId
