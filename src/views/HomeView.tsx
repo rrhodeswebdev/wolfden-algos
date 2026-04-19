@@ -77,6 +77,17 @@ export const HomeView = (props: HomeViewProps) => {
         ? "bg-[var(--accent-red)]"
         : "bg-[var(--accent-yellow)] animate-pulse";
 
+  const hasActivity = props.activeRuns.length > 0 || props.stats.totalTrades > 0;
+  const liveCount = props.activeRuns.filter((r) => r.mode === "live").length;
+  const shadowCount = props.activeRuns.filter((r) => r.mode === "shadow").length;
+  const positionSymbols = [...new Set(props.positions.map((p) => p.symbol))];
+  const positionSymbolsLabel =
+    positionSymbols.length === 0
+      ? "—"
+      : positionSymbols.length <= 3
+        ? positionSymbols.join(" · ")
+        : `${positionSymbols.slice(0, 3).join(" · ")} +${positionSymbols.length - 3}`;
+
   return (
     <div className="flex-1 flex flex-col overflow-auto bg-[var(--bg-primary)]">
       <div className="max-w-[1400px] w-full mx-auto p-5 flex flex-col gap-4">
@@ -122,8 +133,35 @@ export const HomeView = (props: HomeViewProps) => {
           )}
         </div>
 
-        {/* Section 2: KPI row — filled in Task 6 */}
-        <div id="home-section-kpis" />
+        {/* Section 2: KPI row */}
+        <div id="home-section-kpis" className="grid grid-cols-4 gap-3">
+          <KpiCard
+            label="Total P&L"
+            value={hasActivity ? formatPnl(props.stats.totalPnl) : "$0.00"}
+            valueColor={hasActivity ? pnlColorClass(props.stats.totalPnl) : undefined}
+            detail={hasActivity ? `Realized ${formatPnl(props.stats.realizedPnl)} · Unrealized ${formatPnl(props.stats.unrealizedPnl)}` : undefined}
+            sparkline={props.pnlHistory.length > 1 ? props.pnlHistory : undefined}
+            onClick={() => props.onNavigate("trading")}
+          />
+          <KpiCard
+            label="Win Rate"
+            value={props.stats.totalTrades > 0 ? `${props.stats.winRate}%` : "—"}
+            detail={props.stats.totalTrades > 0 ? `${props.stats.wins} W · ${props.stats.losses} L` : undefined}
+            onClick={() => props.onNavigate("trading", { scrollTo: "history" })}
+          />
+          <KpiCard
+            label="Active Algos"
+            value={`${props.activeRuns.length}`}
+            detail={props.activeRuns.length > 0 ? `${liveCount} live · ${shadowCount} shadow` : undefined}
+            onClick={() => props.onNavigate("algos")}
+          />
+          <KpiCard
+            label="Open Positions"
+            value={`${props.stats.openPositions}`}
+            detail={positionSymbolsLabel !== "—" ? positionSymbolsLabel : undefined}
+            onClick={() => props.onNavigate("trading", { scrollTo: "positions" })}
+          />
+        </div>
 
         {/* Section 3: Hero P&L chart — filled in Task 7 */}
         <div id="home-section-chart" />
@@ -184,5 +222,50 @@ const AccountCard = ({ name, balance, dayPnl, positionCount, isActive, onClick }
         <div className="text-sm font-medium">{positionCount}</div>
       </div>
     </div>
+  </button>
+);
+
+type KpiCardProps = {
+  label: string;
+  value: string;
+  valueColor?: string;
+  detail?: string;
+  sparkline?: number[];
+  onClick: () => void;
+};
+
+const KpiCard = ({ label, value, valueColor, detail, sparkline, onClick }: KpiCardProps) => (
+  <button
+    onClick={onClick}
+    className="group relative text-left p-4 rounded-xl bg-[var(--bg-panel)] border border-[var(--border)] hover:border-[var(--accent-blue)] hover:bg-[var(--bg-secondary)] transition-colors cursor-pointer overflow-hidden"
+  >
+    <div className="flex items-center justify-between mb-2">
+      <span className="text-[10px] uppercase tracking-wider text-[var(--text-secondary)] font-semibold">{label}</span>
+      <span className="text-[var(--accent-blue)] text-sm opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+    </div>
+    <div className={`text-[22px] font-bold tracking-tight leading-tight ${valueColor ?? ""}`}>{value}</div>
+    {detail ? <div className="text-[11px] text-[var(--text-secondary)] mt-1">{detail}</div> : null}
+    {sparkline && sparkline.length > 1 ? (
+      <svg
+        viewBox={`0 0 ${sparkline.length} 20`}
+        preserveAspectRatio="none"
+        className="absolute right-3 bottom-3 w-16 h-5 opacity-40 pointer-events-none"
+      >
+        <polyline
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          points={sparkline
+            .map((v, i) => {
+              const min = Math.min(...sparkline);
+              const max = Math.max(...sparkline);
+              const range = max - min || 1;
+              const y = 18 - ((v - min) / range) * 16;
+              return `${i},${y}`;
+            })
+            .join(" ")}
+        />
+      </svg>
+    ) : null}
   </button>
 );
