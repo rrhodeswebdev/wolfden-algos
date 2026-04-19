@@ -17,10 +17,11 @@ import { useAlgoLogs } from "./hooks/useAlgoLogs";
 import { useAlgoHealth } from "./hooks/useAlgoHealth";
 import type { DataSource } from "./hooks/useTradingSimulation";
 import { VenvSetupModal } from "./components/VenvSetupModal";
-import type { Algo, AlgoRun, View } from "./types";
+import type { Algo, AlgoRun, View, NavOptions, NavContext } from "./types";
 
 export const App = () => {
   const [activeView, setActiveView] = useState<View>("home");
+  const [pendingNavContext, setPendingNavContext] = useState<NavContext | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"waiting" | "connected" | "error">("waiting");
   const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number }>>({});
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
@@ -225,8 +226,8 @@ export const App = () => {
   const hasUnsavedChanges = selectedAlgo ? editorCode !== selectedAlgo.code || editorDeps !== selectedAlgo.dependencies : false;
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
 
-  const handleNavigate = (view: View) => {
-    if (view === activeView) return;
+  const handleNavigate = (view: View, options?: NavOptions) => {
+    if (view === activeView && !options) return;
     if (activeView === "editor" && hasUnsavedChanges) {
       setConfirmDialog({
         message: "You have unsaved changes. Leave without saving?",
@@ -236,14 +237,20 @@ export const App = () => {
             setEditorCode(selectedAlgo.code);
             setEditorDeps(selectedAlgo.dependencies);
           }
+          setPendingNavContext(options ? { ...options, targetView: view } : null);
           setActiveView(view);
           setConfirmDialog(null);
         },
       });
       return;
     }
+    setPendingNavContext(options ? { ...options, targetView: view } : null);
     setActiveView(view);
   };
+
+  const clearPendingNavContext = useCallback(() => {
+    setPendingNavContext(null);
+  }, []);
 
   const handleSelectAlgo = (id: number) => {
     if (id === selectedAlgoId) return;
@@ -381,6 +388,11 @@ export const App = () => {
           activeRuns={activeRuns}
           stats={simulation.stats}
           positions={simulation.positions}
+          pnlHistory={simulation.pnlHistory}
+          runPnlHistories={simulation.runPnlHistories}
+          algoStats={simulation.algoStats}
+          onNavigate={handleNavigate}
+          onStopAlgo={handleStopAlgo}
         />
       )}
 
@@ -417,11 +429,19 @@ export const App = () => {
           onClearLogs={clearLogs}
           onOpenAiTerminal={handleOpenAiTerminal}
           aiTerminalAlgoIds={aiTerminalAlgoIds}
+          initialInstanceId={pendingNavContext?.targetView === "algos" ? pendingNavContext.instanceId : null}
+          onInstanceFocused={clearPendingNavContext}
         />
       )}
 
       {activeView === "trading" && (
-        <TradingView simulation={simulation} algos={algos} activeRuns={activeRuns} />
+        <TradingView
+          simulation={simulation}
+          algos={algos}
+          activeRuns={activeRuns}
+          initialContext={pendingNavContext}
+          onContextConsumed={clearPendingNavContext}
+        />
       )}
 
       {aiTerminalAlgos.length > 0 && (
