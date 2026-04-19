@@ -1,3 +1,8 @@
+## [0.3.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.2.0...v0.3.0) (2026-04-19)
+
+### Features
+
+* editor view redesign — multi-tab workspace ([#12](https://github.com/rrhodeswebdev/wolfden-algos/issues/12)) ([48c24ca](https://github.com/rrhodeswebdev/wolfden-algos/commit/48c24cae95c2534442dd354d0ff8d5d5e019d001))
 ## 0.2.0 (2026-04-19)
 
 ### Features
