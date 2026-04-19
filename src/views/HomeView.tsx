@@ -245,27 +245,20 @@ const KpiCard = ({ label, value, valueColor, detail, sparkline, onClick }: KpiCa
     </div>
     <div className={`text-[22px] font-bold tracking-tight leading-tight ${valueColor ?? ""}`}>{value}</div>
     {detail ? <div className="text-[11px] text-[var(--text-secondary)] mt-1">{detail}</div> : null}
-    {sparkline && sparkline.length > 1 ? (
-      <svg
-        viewBox={`0 0 ${sparkline.length} 20`}
-        preserveAspectRatio="none"
-        className="absolute right-3 bottom-3 w-16 h-5 opacity-40 pointer-events-none"
-      >
-        <polyline
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          points={sparkline
-            .map((v, i) => {
-              const min = Math.min(...sparkline);
-              const max = Math.max(...sparkline);
-              const range = max - min || 1;
-              const y = 18 - ((v - min) / range) * 16;
-              return `${i},${y}`;
-            })
-            .join(" ")}
-        />
-      </svg>
-    ) : null}
+    {sparkline && sparkline.length > 1 ? (() => {
+      const min = Math.min(...sparkline);
+      const max = Math.max(...sparkline);
+      const range = max - min || 1;
+      const points = sparkline.map((v, i) => `${i},${18 - ((v - min) / range) * 16}`).join(" ");
+      return (
+        <svg
+          viewBox={`0 0 ${sparkline.length} 20`}
+          preserveAspectRatio="none"
+          className={`absolute right-3 bottom-3 w-16 h-5 opacity-40 pointer-events-none ${valueColor ?? ""}`}
+        >
+          <polyline fill="none" stroke="currentColor" strokeWidth="1.5" points={points} />
+        </svg>
+      );
+    })() : null}
   </button>
 );
