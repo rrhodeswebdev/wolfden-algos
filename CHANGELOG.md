@@ -1,3 +1,8 @@
+## [0.4.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.3.0...v0.4.0) (2026-04-19)
+
+### Features
+
+* algos view redesign — grouped list + detail panel + slide-over launcher ([#13](https://github.com/rrhodeswebdev/wolfden-algos/issues/13)) ([2924d92](https://github.com/rrhodeswebdev/wolfden-algos/commit/2924d92ea507f0382907ec914109e2b991699d44))
 ## [0.3.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.2.0...v0.3.0) (2026-04-19)
 
 ### Features
