@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Plus, Search, Sparkles, Terminal, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Search, Terminal, Trash2 } from "lucide-react";
 import type { Algo } from "../types";
 
 type AlgoManagerProps = {
@@ -8,7 +8,6 @@ type AlgoManagerProps = {
   dirtyAlgoIds?: Set<number>;
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
-  onCreateAlgoWithAi?: () => void;
   onOpenAiTerminal?: (algoId: number) => void;
   aiTerminalAlgoIds?: Set<number>;
   onDeleteAlgo: (id: number) => void;
@@ -21,7 +20,6 @@ export const AlgoManager = ({
   dirtyAlgoIds,
   onSelectAlgo,
   onCreateAlgo,
-  onCreateAlgoWithAi,
   onOpenAiTerminal,
   aiTerminalAlgoIds,
   onDeleteAlgo,
@@ -83,24 +81,13 @@ export const AlgoManager = ({
           <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
             Algos · {algos.length}
           </span>
-          <div className="flex items-center gap-1">
-            {onCreateAlgoWithAi && (
-              <button
-                onClick={onCreateAlgoWithAi}
-                title="New algo with AI"
-                className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/10 transition-colors"
-              >
-                <Sparkles size={13} />
-              </button>
-            )}
-            <button
-              onClick={onCreateAlgo}
-              title="New algo"
-              className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/10 transition-colors"
-            >
-              <Plus size={14} />
-            </button>
-          </div>
+          <button
+            onClick={onCreateAlgo}
+            title="New algo (opens AI terminal)"
+            className="w-7 h-7 inline-flex items-center justify-center rounded-md text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/10 transition-colors"
+          >
+            <Plus size={14} />
+          </button>
         </div>
         <div className="relative">
           <Search

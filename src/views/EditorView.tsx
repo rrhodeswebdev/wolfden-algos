@@ -12,7 +12,6 @@ type EditorViewProps = {
   aiTerminalAlgoIds: Set<number>;
   onSelectAlgo: (id: number) => void;
   onCreateAlgo: () => void;
-  onCreateAlgoWithAi: () => void;
   onOpenAiTerminal: (algoId: number) => void;
   onRequestCloseTab: (id: number) => void;
   onRequestCloseMany: (ids: number[]) => void;
@@ -28,7 +27,6 @@ export const EditorView = ({
   aiTerminalAlgoIds,
   onSelectAlgo,
   onCreateAlgo,
-  onCreateAlgoWithAi,
   onOpenAiTerminal,
   onRequestCloseTab,
   onRequestCloseMany,
@@ -81,7 +79,6 @@ export const EditorView = ({
           dirtyAlgoIds={dirtyAlgoIds}
           onSelectAlgo={onSelectAlgo}
           onCreateAlgo={onCreateAlgo}
-          onCreateAlgoWithAi={onCreateAlgoWithAi}
           onOpenAiTerminal={onOpenAiTerminal}
           aiTerminalAlgoIds={aiTerminalAlgoIds}
           onDeleteAlgo={onDeleteAlgo}

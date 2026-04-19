@@ -233,6 +233,7 @@ export const App = () => {
       });
       setAlgos((prev) => [algo, ...prev]);
       tabs.openTab(algo);
+      setAiTerminalAlgoIds((prev) => new Set(prev).add(algo.id));
     } catch (e) {
       console.error("Failed to create algo:", e);
       toast.error("Failed to create algo: " + e);
@@ -299,23 +300,6 @@ export const App = () => {
       },
     });
   };
-
-  const handleCreateAlgoWithAi = useCallback(async () => {
-    try {
-      const name = `algo_${Date.now()}`;
-      const algo = await invoke<Algo>("create_algo", {
-        name,
-        code: DEFAULT_ALGO,
-        dependencies: "",
-      });
-      setAlgos((prev) => [algo, ...prev]);
-      tabs.openTab(algo);
-      setAiTerminalAlgoIds((prev) => new Set(prev).add(algo.id));
-    } catch (e) {
-      console.error("Failed to create algo:", e);
-      toast.error("Failed to create algo: " + e);
-    }
-  }, [tabs]);
 
   const handleOpenAiTerminal = useCallback((algoId: number) => {
     if (aiTerminalAlgoIds.has(algoId)) return;
@@ -401,7 +385,6 @@ export const App = () => {
             aiTerminalAlgoIds={aiTerminalAlgoIds}
             onSelectAlgo={handleSelectAlgo}
             onCreateAlgo={handleCreateAlgo}
-            onCreateAlgoWithAi={handleCreateAlgoWithAi}
             onOpenAiTerminal={handleOpenAiTerminal}
             onRequestCloseTab={handleRequestCloseTab}
             onRequestCloseMany={handleRequestCloseMany}
