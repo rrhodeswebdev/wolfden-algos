@@ -388,6 +388,11 @@ export const App = () => {
           activeRuns={activeRuns}
           stats={simulation.stats}
           positions={simulation.positions}
+          pnlHistory={simulation.pnlHistory}
+          runPnlHistories={simulation.runPnlHistories}
+          algoStats={simulation.algoStats}
+          onNavigate={handleNavigate}
+          onStopAlgo={handleStopAlgo}
         />
       )}
 
