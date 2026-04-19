@@ -20,6 +20,7 @@ type AlgosViewProps = {
   onOpenAiTerminal?: (algoId: number) => void;
   aiTerminalAlgoIds?: Set<number>;
   initialInstanceId?: string | null;
+  /** Called after initialInstanceId is consumed (found or not). Not called when falling back to default auto-select. */
   onInstanceFocused?: () => void;
 };
 
@@ -378,7 +379,8 @@ export const AlgosView = ({
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [hasAutoSelected, setHasAutoSelected] = useState(false);
 
-  // Auto-select first running algo on mount
+  // Auto-select on mount: prefer navigation-provided instance,
+  // otherwise fall back to first running algo
   useEffect(() => {
     if (hasAutoSelected) return;
     if (initialInstanceId) {
