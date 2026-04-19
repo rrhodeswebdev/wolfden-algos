@@ -99,10 +99,12 @@ impl AiTerminalManager {
         ];
         for c in &candidates {
             if c.join("algo_runtime").exists() {
-                return c.canonicalize().unwrap_or_else(|_| c.clone());
+                let canon = c.canonicalize().unwrap_or_else(|_| c.clone());
+                return strip_unc_prefix(canon);
             }
         }
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        strip_unc_prefix(cwd)
     }
 
     /// Derives a filesystem slug from an algo name.
@@ -444,6 +446,28 @@ fn which_claude() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Strips the Windows extended-length path prefix (`\\?\` or `\\?\UNC\`) from
+/// a path. Rust's `current_dir()` and `canonicalize()` can return prefixed
+/// paths, but downstream consumers (notably Bun, which Claude Code runs on)
+/// segfault when handed extended-length paths on Windows. No-op on non-Windows
+/// or for paths without the prefix.
+fn strip_unc_prefix(path: PathBuf) -> PathBuf {
+    if !cfg!(windows) {
+        return path;
+    }
+    let s = match path.to_str() {
+        Some(s) => s,
+        None => return path,
+    };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path
 }
 
 /// Returns true if `path` is a Windows batch file that must be launched via
