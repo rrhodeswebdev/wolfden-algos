@@ -8,6 +8,8 @@ export type TabBuffer = {
   savedDeps: string;
 };
 
+type ExternalUpdateResult = { synced: boolean; conflicted: boolean };
+
 type State = {
   openTabIds: number[];
   activeTabId: number | null;
@@ -18,6 +20,24 @@ const EMPTY: State = {
   openTabIds: [],
   activeTabId: null,
   buffers: {},
+};
+
+const pickNextActive = (openTabIds: number[], closingId: number): number | null => {
+  const idx = openTabIds.indexOf(closingId);
+  if (idx === -1) return null;
+  // right neighbor
+  if (idx + 1 < openTabIds.length) return openTabIds[idx + 1];
+  // left neighbor
+  if (idx - 1 >= 0) return openTabIds[idx - 1];
+  return null;
+};
+
+const removeTab = (s: State, id: number): State => {
+  if (!s.openTabIds.includes(id)) return s;
+  const nextOpen = s.openTabIds.filter((x) => x !== id);
+  const nextActive = s.activeTabId === id ? pickNextActive(s.openTabIds, id) : s.activeTabId;
+  const { [id]: _removed, ...nextBuffers } = s.buffers;
+  return { openTabIds: nextOpen, activeTabId: nextActive, buffers: nextBuffers };
 };
 
 export type UseEditorTabs = ReturnType<typeof useEditorTabs>;
@@ -68,29 +88,8 @@ export const useEditorTabs = () => {
     setState((s) => (s.openTabIds.includes(id) ? { ...s, activeTabId: id } : s));
   }, []);
 
-  const pickNextActive = (openTabIds: number[], closingId: number): number | null => {
-    const idx = openTabIds.indexOf(closingId);
-    if (idx === -1) return null;
-    // right neighbor
-    if (idx + 1 < openTabIds.length) return openTabIds[idx + 1];
-    // left neighbor
-    if (idx - 1 >= 0) return openTabIds[idx - 1];
-    return null;
-  };
-
   const forceCloseTab = useCallback((id: number) => {
-    setState((s) => {
-      if (!s.openTabIds.includes(id)) return s;
-      const nextOpen = s.openTabIds.filter((x) => x !== id);
-      const nextActive =
-        s.activeTabId === id ? pickNextActive(s.openTabIds, id) : s.activeTabId;
-      const { [id]: _removed, ...nextBuffers } = s.buffers;
-      return {
-        openTabIds: nextOpen,
-        activeTabId: nextActive,
-        buffers: nextBuffers,
-      };
-    });
+    setState((s) => removeTab(s, id));
   }, []);
 
   const closeTab = useCallback(
@@ -144,48 +143,25 @@ export const useEditorTabs = () => {
   }, []);
 
   const onAlgoDeleted = useCallback((id: number) => {
-    setState((s) => {
-      if (!s.openTabIds.includes(id)) return s;
-      const nextOpen = s.openTabIds.filter((x) => x !== id);
-      const nextActive =
-        s.activeTabId === id ? pickNextActive(s.openTabIds, id) : s.activeTabId;
-      const { [id]: _removed, ...nextBuffers } = s.buffers;
-      return {
-        openTabIds: nextOpen,
-        activeTabId: nextActive,
-        buffers: nextBuffers,
-      };
-    });
+    setState((s) => removeTab(s, id));
   }, []);
-
-  type ExternalUpdateResult = { synced: boolean; conflicted: boolean };
 
   const onAlgoExternallyUpdated = useCallback(
     (id: number, code: string, deps: string): ExternalUpdateResult => {
-      let result: ExternalUpdateResult = { synced: false, conflicted: false };
-      setState((s) => {
-        const b = s.buffers[id];
-        if (!b) {
-          result = { synced: false, conflicted: false };
-          return s;
-        }
-        const dirty = b.code !== b.savedCode || b.deps !== b.savedDeps;
-        if (dirty) {
-          result = { synced: false, conflicted: true };
-          return s;
-        }
-        result = { synced: true, conflicted: false };
-        return {
-          ...s,
-          buffers: {
-            ...s.buffers,
-            [id]: { code, deps, savedCode: code, savedDeps: deps },
-          },
-        };
-      });
-      return result;
+      const b = state.buffers[id];
+      if (!b) return { synced: false, conflicted: false };
+      const dirty = b.code !== b.savedCode || b.deps !== b.savedDeps;
+      if (dirty) return { synced: false, conflicted: true };
+      setState((s) => ({
+        ...s,
+        buffers: {
+          ...s.buffers,
+          [id]: { code, deps, savedCode: code, savedDeps: deps },
+        },
+      }));
+      return { synced: true, conflicted: false };
     },
-    [],
+    [state.buffers],
   );
 
   const activeBuffer = state.activeTabId !== null ? state.buffers[state.activeTabId] : null;
