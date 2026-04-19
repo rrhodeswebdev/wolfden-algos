@@ -15,6 +15,7 @@ import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import { useAlgoLogs } from "./hooks/useAlgoLogs";
 import { useAlgoHealth } from "./hooks/useAlgoHealth";
+import { useEditorTabs } from "./hooks/useEditorTabs";
 import type { DataSource } from "./hooks/useTradingSimulation";
 import { VenvSetupModal } from "./components/VenvSetupModal";
 import type { Algo, AlgoRun, View, NavOptions, NavContext } from "./types";
@@ -26,15 +27,18 @@ export const App = () => {
   const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number }>>({});
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [algos, setAlgos] = useState<Algo[]>([]);
-  const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
-  const [editorCode, setEditorCode] = useState(DEFAULT_ALGO);
-  const [editorDeps, setEditorDeps] = useState("");
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
 
-  const selectedAlgoIdRef = useRef(selectedAlgoId);
+  const tabs = useEditorTabs();
+  const tabsRef = useRef(tabs);
   useEffect(() => {
-    selectedAlgoIdRef.current = selectedAlgoId;
-  }, [selectedAlgoId]);
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  const algosRef = useRef(algos);
+  useEffect(() => {
+    algosRef.current = algos;
+  }, [algos]);
 
   const activeRunsRef = useRef(activeRuns);
   useEffect(() => {
@@ -60,7 +64,6 @@ export const App = () => {
   const { logsByInstance, clearLogs } = useAlgoLogs();
   const { healthByInstance } = useAlgoHealth();
 
-  const selectedAlgo = algos.find((a) => a.id === selectedAlgoId) ?? null;
   const aiTerminalAlgos = algos.filter((a) => aiTerminalAlgoIds.has(a.id));
 
   const loadAlgos = useCallback(async () => {
@@ -72,7 +75,6 @@ export const App = () => {
     }
   }, []);
 
-  // Load algos and running instances on startup
   const loadRunningInstances = useCallback(async () => {
     try {
       type Instance = { id: string; algo_id: number; data_source_id: string; account: string; mode: string; status: string };
@@ -139,8 +141,6 @@ export const App = () => {
     const u5 = listen<string>("nt-chart-removed", (event) => {
       const removedId = event.payload;
       setDataSources((prev) => prev.filter((ds) => ds.id !== removedId));
-
-      // Stop any algos running on the disconnected chart
       const toStop = activeRunsRef.current.filter((r) => r.data_source_id === removedId);
       for (const run of toStop) {
         invoke("stop_algo_instance", { instanceId: run.instance_id }).catch((e) =>
@@ -151,12 +151,15 @@ export const App = () => {
     });
     const u6 = listen<{ algo_id: number; code: string }>("algo-code-updated", (event) => {
       const { algo_id, code } = event.payload;
+      const algo = algosRef.current.find((a) => a.id === algo_id);
+      const deps = algo?.dependencies ?? "";
       setAlgos((prev) =>
         prev.map((a) => (a.id === algo_id ? { ...a, code, updated_at: new Date().toISOString() } : a))
       );
-      // If the updated algo is currently selected in the editor, update editorCode
-      if (algo_id === selectedAlgoIdRef.current) {
-        setEditorCode(code);
+      const result = tabsRef.current.onAlgoExternallyUpdated(algo_id, code, deps);
+      if (result.conflicted) {
+        const name = algosRef.current.find((a) => a.id === algo_id)?.name ?? `algo ${algo_id}`;
+        toast.error(`External update to ${name}. Your unsaved edits will overwrite it on save.`);
       }
     });
     return () => {
@@ -169,12 +172,37 @@ export const App = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (selectedAlgo) {
-      setEditorCode(selectedAlgo.code);
-      setEditorDeps(selectedAlgo.dependencies);
-    }
-  }, [selectedAlgo?.id]);
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
+
+  const handleNavigate = (view: View, options?: NavOptions) => {
+    if (view === activeView && !options) return;
+    setPendingNavContext(options ? { ...options, targetView: view } : null);
+    setActiveView(view);
+  };
+
+  const clearPendingNavContext = useCallback(() => {
+    setPendingNavContext(null);
+  }, []);
+
+  const handleSelectAlgo = (id: number) => {
+    const algo = algos.find((a) => a.id === id);
+    if (!algo) return;
+    tabs.openTab(algo);
+  };
+
+  const handleRequestCloseTab = (id: number) => {
+    const { dirty } = tabs.closeTab(id);
+    if (!dirty) return;
+    const name = algos.find((a) => a.id === id)?.name ?? `algo ${id}`;
+    setConfirmDialog({
+      message: `Close ${name}? Unsaved changes will be lost.`,
+      confirmLabel: "Close",
+      onConfirm: () => {
+        tabs.forceCloseTab(id);
+        setConfirmDialog(null);
+      },
+    });
+  };
 
   const handleCreateAlgo = async () => {
     try {
@@ -185,25 +213,30 @@ export const App = () => {
         dependencies: "",
       });
       setAlgos((prev) => [algo, ...prev]);
-      setSelectedAlgoId(algo.id);
-      setEditorCode(algo.code);
+      tabs.openTab(algo);
     } catch (e) {
       console.error("Failed to create algo:", e);
+      toast.error("Failed to create algo: " + e);
     }
   };
 
   const handleSaveAlgo = async () => {
-    if (!selectedAlgo) return;
+    const activeId = tabs.activeTabId;
+    if (activeId === null) return;
+    const algo = algos.find((a) => a.id === activeId);
+    if (!algo) return;
     try {
       await invoke("update_algo", {
-        id: selectedAlgo.id,
-        name: selectedAlgo.name,
-        code: editorCode,
-        dependencies: editorDeps,
+        id: algo.id,
+        name: algo.name,
+        code: tabs.activeCode,
+        dependencies: tabs.activeDeps,
       });
+      tabs.markActiveSaved();
       await loadAlgos();
     } catch (e) {
       console.error("Failed to save algo:", e);
+      toast.error("Failed to save: " + e);
     }
   };
 
@@ -223,49 +256,15 @@ export const App = () => {
     }
   };
 
-  const hasUnsavedChanges = selectedAlgo ? editorCode !== selectedAlgo.code || editorDeps !== selectedAlgo.dependencies : false;
-  const [confirmDialog, setConfirmDialog] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
-
-  const handleNavigate = (view: View, options?: NavOptions) => {
-    if (view === activeView && !options) return;
-    if (activeView === "editor" && hasUnsavedChanges) {
-      setConfirmDialog({
-        message: "You have unsaved changes. Leave without saving?",
-        confirmLabel: "Leave",
-        onConfirm: () => {
-          if (selectedAlgo) {
-            setEditorCode(selectedAlgo.code);
-            setEditorDeps(selectedAlgo.dependencies);
-          }
-          setPendingNavContext(options ? { ...options, targetView: view } : null);
-          setActiveView(view);
-          setConfirmDialog(null);
-        },
-      });
-      return;
+  const handleRenameActiveAlgo = () => {
+    const activeId = tabs.activeTabId;
+    if (activeId === null) return;
+    const algo = algos.find((a) => a.id === activeId);
+    if (!algo) return;
+    const newName = window.prompt("Rename algo", algo.name);
+    if (newName && newName.trim() && newName.trim() !== algo.name) {
+      handleRenameAlgo(activeId, newName.trim());
     }
-    setPendingNavContext(options ? { ...options, targetView: view } : null);
-    setActiveView(view);
-  };
-
-  const clearPendingNavContext = useCallback(() => {
-    setPendingNavContext(null);
-  }, []);
-
-  const handleSelectAlgo = (id: number) => {
-    if (id === selectedAlgoId) return;
-    if (hasUnsavedChanges) {
-      setConfirmDialog({
-        message: "You have unsaved changes. Leave without saving?",
-        confirmLabel: "Leave",
-        onConfirm: () => {
-          setSelectedAlgoId(id);
-          setConfirmDialog(null);
-        },
-      });
-      return;
-    }
-    setSelectedAlgoId(id);
   };
 
   const handleDeleteAlgo = (id: number) => {
@@ -276,10 +275,7 @@ export const App = () => {
         setConfirmDialog(null);
         try {
           await invoke("delete_algo", { id });
-          if (selectedAlgoId === id) {
-            setSelectedAlgoId(null);
-            setEditorCode(DEFAULT_ALGO);
-          }
+          tabs.onAlgoDeleted(id);
           await loadAlgos();
         } catch (e) {
           console.error("Failed to delete algo:", e);
@@ -297,19 +293,16 @@ export const App = () => {
         dependencies: "",
       });
       setAlgos((prev) => [algo, ...prev]);
-      setSelectedAlgoId(algo.id);
+      tabs.openTab(algo);
       setAiTerminalAlgoIds((prev) => new Set(prev).add(algo.id));
     } catch (e) {
       console.error("Failed to create algo:", e);
       toast.error("Failed to create algo: " + e);
     }
-  }, []);
+  }, [tabs]);
 
   const handleOpenAiTerminal = useCallback((algoId: number) => {
-    if (aiTerminalAlgoIds.has(algoId)) {
-      // Terminal already running — just show the panel
-      return;
-    }
+    if (aiTerminalAlgoIds.has(algoId)) return;
     setAiTerminalAlgoIds((prev) => new Set(prev).add(algoId));
   }, [aiTerminalAlgoIds]);
 
@@ -324,7 +317,6 @@ export const App = () => {
   const handleStartAlgo = async (id: number, mode: "live" | "shadow", account: string, dataSourceId: string) => {
     let instanceId: string | null = null;
     try {
-      // Create the instance in the DB first
       const instance = await invoke<{ id: string }>("create_algo_instance", {
         algoId: id,
         dataSourceId: dataSourceId,
@@ -332,23 +324,16 @@ export const App = () => {
         mode,
       });
       instanceId = instance.id;
-
-      // Show "installing" status while deps install + process starts
       setActiveRuns((prev) => [...prev, {
         algo_id: id, status: "installing", mode, account,
         data_source_id: dataSourceId, instance_id: instanceId!,
       }]);
-
-      // start_algo_instance now handles dep installation before spawning
       await invoke("start_algo_instance", { instanceId });
-
-      // Update status to running
       setActiveRuns((prev) => prev.map((r) =>
         r.instance_id === instanceId ? { ...r, status: "running" } : r
       ));
     } catch (e) {
       console.error("Failed to start algo:", e);
-      // Remove the "installing" entry on failure (if instance was created)
       if (instanceId) {
         setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
       }
@@ -362,7 +347,6 @@ export const App = () => {
     } catch (e) {
       console.error("Failed to stop algo:", e);
     }
-    // Always remove from UI even if backend call fails
     setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
     clearErrors(instanceId);
     clearLogs(instanceId);
@@ -372,94 +356,93 @@ export const App = () => {
     <div className="flex flex-col h-screen bg-[var(--bg-primary)]">
       <TitleBar title="Wolf Den" />
       <div className="flex flex-1 min-h-0">
-      {/* Sidebar Navigation */}
-      <Sidebar
-        activeView={activeView}
-        onNavigate={handleNavigate}
-        connectionStatus={connectionStatus}
-      />
-
-      {/* View Content */}
-      {activeView === "home" && (
-        <HomeView
-          connectionStatus={connectionStatus}
-          accounts={accounts}
-          algos={algos}
-          activeRuns={activeRuns}
-          stats={simulation.stats}
-          positions={simulation.positions}
-          pnlHistory={simulation.pnlHistory}
-          runPnlHistories={simulation.runPnlHistories}
-          algoStats={simulation.algoStats}
+        <Sidebar
+          activeView={activeView}
           onNavigate={handleNavigate}
-          onStopAlgo={handleStopAlgo}
+          connectionStatus={connectionStatus}
         />
-      )}
 
-      {activeView === "editor" && (
-        <EditorView
-          algos={algos}
-          selectedAlgoId={selectedAlgoId}
-          editorCode={editorCode}
-          editorDeps={editorDeps}
-          onSelectAlgo={handleSelectAlgo}
-          onCreateAlgo={handleCreateAlgo}
-          onCreateAlgoWithAi={handleCreateAlgoWithAi}
-          onOpenAiTerminal={handleOpenAiTerminal}
-          aiTerminalAlgoIds={aiTerminalAlgoIds}
-          onDeleteAlgo={handleDeleteAlgo}
-          onRenameAlgo={handleRenameAlgo}
-          onEditorChange={setEditorCode}
-          onDepsChange={setEditorDeps}
-          onSaveAlgo={handleSaveAlgo}
-        />
-      )}
+        {activeView === "home" && (
+          <HomeView
+            connectionStatus={connectionStatus}
+            accounts={accounts}
+            algos={algos}
+            activeRuns={activeRuns}
+            stats={simulation.stats}
+            positions={simulation.positions}
+            pnlHistory={simulation.pnlHistory}
+            runPnlHistories={simulation.runPnlHistories}
+            algoStats={simulation.algoStats}
+            onNavigate={handleNavigate}
+            onStopAlgo={handleStopAlgo}
+          />
+        )}
 
-      {activeView === "algos" && (
-        <AlgosView
-          algos={algos}
-          dataSources={dataSources}
-          activeRuns={activeRuns}
-          algoStats={simulation.algoStats}
-          errorsByInstance={errorsByInstance}
-          logsByInstance={logsByInstance}
-          healthByInstance={healthByInstance}
-          onStartAlgo={handleStartAlgo}
-          onStopAlgo={handleStopAlgo}
-          onClearLogs={clearLogs}
-          onOpenAiTerminal={handleOpenAiTerminal}
-          aiTerminalAlgoIds={aiTerminalAlgoIds}
-          initialInstanceId={pendingNavContext?.targetView === "algos" ? pendingNavContext.instanceId : null}
-          onInstanceFocused={clearPendingNavContext}
-        />
-      )}
+        {activeView === "editor" && (
+          <EditorView
+            algos={algos}
+            tabs={tabs}
+            aiTerminalAlgoIds={aiTerminalAlgoIds}
+            onSelectAlgo={handleSelectAlgo}
+            onCreateAlgo={handleCreateAlgo}
+            onCreateAlgoWithAi={handleCreateAlgoWithAi}
+            onOpenAiTerminal={handleOpenAiTerminal}
+            onRequestCloseTab={handleRequestCloseTab}
+            onDeleteAlgo={handleDeleteAlgo}
+            onRenameAlgo={handleRenameAlgo}
+            onSaveAlgo={handleSaveAlgo}
+            onRenameActiveAlgo={handleRenameActiveAlgo}
+          />
+        )}
 
-      {activeView === "trading" && (
-        <TradingView
-          simulation={simulation}
-          algos={algos}
-          activeRuns={activeRuns}
-          initialContext={pendingNavContext}
-          onContextConsumed={clearPendingNavContext}
-        />
-      )}
+        {activeView === "algos" && (
+          <AlgosView
+            algos={algos}
+            dataSources={dataSources}
+            activeRuns={activeRuns}
+            algoStats={simulation.algoStats}
+            errorsByInstance={errorsByInstance}
+            logsByInstance={logsByInstance}
+            healthByInstance={healthByInstance}
+            onStartAlgo={handleStartAlgo}
+            onStopAlgo={handleStopAlgo}
+            onClearLogs={clearLogs}
+            onOpenAiTerminal={handleOpenAiTerminal}
+            aiTerminalAlgoIds={aiTerminalAlgoIds}
+            initialInstanceId={pendingNavContext?.targetView === "algos" ? pendingNavContext.instanceId : null}
+            onInstanceFocused={clearPendingNavContext}
+          />
+        )}
 
-      {aiTerminalAlgos.length > 0 && (
-        <AiTerminalPanel
-          tabs={aiTerminalAlgos.map((a) => ({ algoId: a.id, algoName: a.name }))}
-          selectedAlgoId={selectedAlgoId}
-          onSelectAlgo={setSelectedAlgoId}
-          onClose={handleCloseAiTerminal}
-          onSpawnError={(algoId, error) => {
-            handleCloseAiTerminal(algoId);
-            if (error.includes("not found")) {
-              toast.error("Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code");
-            } else {
-              toast.error("Failed to start AI terminal: " + error);
-            }
-          }}
-        />
-      )}
+        {activeView === "trading" && (
+          <TradingView
+            simulation={simulation}
+            algos={algos}
+            activeRuns={activeRuns}
+            initialContext={pendingNavContext}
+            onContextConsumed={clearPendingNavContext}
+          />
+        )}
+
+        {aiTerminalAlgos.length > 0 && (
+          <AiTerminalPanel
+            tabs={aiTerminalAlgos.map((a) => ({ algoId: a.id, algoName: a.name }))}
+            selectedAlgoId={tabs.activeTabId}
+            onSelectAlgo={(id) => {
+              const algo = algos.find((a) => a.id === id);
+              if (algo) tabs.openTab(algo);
+            }}
+            onClose={handleCloseAiTerminal}
+            onSpawnError={(algoId, error) => {
+              handleCloseAiTerminal(algoId);
+              if (error.includes("not found")) {
+                toast.error("Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code");
+              } else {
+                toast.error("Failed to start AI terminal: " + error);
+              }
+            }}
+          />
+        )}
       </div>
 
       {venvReady === false && (
