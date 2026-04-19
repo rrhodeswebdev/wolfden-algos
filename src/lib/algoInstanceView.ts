@@ -212,14 +212,3 @@ export const pnlColorClass = (value: number): string =>
     : value < 0
       ? "text-[var(--accent-red)]"
       : "text-[var(--text-primary)]";
-
-export const formatDurationShort = (msElapsed: number): string => {
-  if (msElapsed < 0) return "0s";
-  const totalSeconds = Math.floor(msElapsed / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-};

@@ -8,6 +8,7 @@ import {
 type AlgoInstanceRowProps = {
   instance: InstanceView;
   isSelected: boolean;
+  hasActiveAiTerminal: boolean;
   onSelect: () => void;
   onClear: () => void;
 };
@@ -34,6 +35,7 @@ const SPARK_H = 18;
 export const AlgoInstanceRow = ({
   instance,
   isSelected,
+  hasActiveAiTerminal,
   onSelect,
   onClear,
 }: AlgoInstanceRowProps) => {
@@ -41,6 +43,7 @@ export const AlgoInstanceRow = ({
   const pnl = stats?.pnl ?? 0;
   const points = sparklinePoints(pnlHistory, SPARK_W, SPARK_H);
   const strokeColor = pnl >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+  const isInstalling = run.status === "installing";
 
   const statusLabel =
     status === "halted"
@@ -49,7 +52,17 @@ export const AlgoInstanceRow = ({
         ? `${errors.warningCount} warn`
         : null;
 
-  const pillLabel = status === "halted" ? "Halted" : run.mode === "live" ? "Live" : "Shadow";
+  const pillLabel = isInstalling
+    ? "Installing"
+    : status === "halted"
+      ? "Halted"
+      : run.mode === "live"
+        ? "Live"
+        : "Shadow";
+
+  const pillTone = isInstalling
+    ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)]"
+    : pillClass(status, run.mode);
 
   return (
     <div
@@ -66,6 +79,12 @@ export const AlgoInstanceRow = ({
       <div className="flex flex-col gap-0.5 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{algo.name}</span>
+          {hasActiveAiTerminal && (
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] animate-pulse shrink-0"
+              title="AI terminal active"
+            />
+          )}
           {statusLabel && (
             <span
               className={`text-[10px] ${
@@ -86,11 +105,11 @@ export const AlgoInstanceRow = ({
       </div>
 
       <span
-        className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold text-center ${pillClass(
-          status,
-          run.mode,
-        )}`}
+        className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded font-semibold text-center inline-flex items-center justify-center gap-1 ${pillTone}`}
       >
+        {isInstalling && (
+          <span className="w-2 h-2 border-2 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin" />
+        )}
         {pillLabel}
       </span>
 

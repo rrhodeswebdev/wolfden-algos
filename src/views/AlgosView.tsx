@@ -208,6 +208,7 @@ export const AlgosView = ({
           hasAnyCharts={dataSources.length > 0}
           hasAnyInstances={activeRuns.length > 0}
           selectedInstanceId={selectedInstanceId}
+          aiTerminalAlgoIds={aiTerminalAlgoIds}
           onSelect={(inst) => setSelectedInstanceId(inst.run.instance_id)}
           onClear={clearInstance}
           onGroupDeepLink={handleGroupDeepLink}

@@ -7,6 +7,7 @@ type AlgosInstanceListProps = {
   hasAnyCharts: boolean;
   hasAnyInstances: boolean;
   selectedInstanceId: string | null;
+  aiTerminalAlgoIds?: Set<number>;
   onSelect: (instance: InstanceView) => void;
   onClear: (instance: InstanceView) => void;
   onGroupDeepLink: (group: GroupView) => void;
@@ -20,6 +21,7 @@ export const AlgosInstanceList = ({
   hasAnyCharts,
   hasAnyInstances,
   selectedInstanceId,
+  aiTerminalAlgoIds,
   onSelect,
   onClear,
   onGroupDeepLink,
@@ -87,6 +89,7 @@ export const AlgosInstanceList = ({
               key={inst.run.instance_id}
               instance={inst}
               isSelected={selectedInstanceId === inst.run.instance_id}
+              hasActiveAiTerminal={aiTerminalAlgoIds?.has(inst.algo.id) ?? false}
               onSelect={() => onSelect(inst)}
               onClear={() => onClear(inst)}
             />
