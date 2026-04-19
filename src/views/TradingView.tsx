@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { type TradingSimulation, type Position, formatPrice } from "../hooks/useTradingSimulation";
-import type { Algo, AlgoRun } from "../types";
+import type { Algo, AlgoRun, NavContext } from "../types";
 
 type TradingViewProps = {
   simulation: TradingSimulation;
   algos: Algo[];
   activeRuns: AlgoRun[];
+  initialContext?: NavContext | null;
+  onContextConsumed?: () => void;
 };
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -95,7 +97,7 @@ const useAnimatedNumber = (target: number, speed = 0.08) => {
 
 type TradingMode = "live" | "shadow";
 
-export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps) => {
+export const TradingView = ({ simulation, algos, activeRuns, initialContext, onContextConsumed }: TradingViewProps) => {
   const { positions, orders, pnlHistory, shadowPnlHistory, runPnlHistories, stats, shadowStats } = simulation;
   const [selectedAlgoId, setSelectedAlgoId] = useState<number | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
@@ -108,6 +110,20 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
       setSelectedAlgoId(null);
     }
   }, [activeRuns, selectedAlgoId]);
+
+  useEffect(() => {
+    if (!initialContext || initialContext.targetView !== "trading") return;
+    if (initialContext.accountFilter !== undefined) setSelectedAccount(initialContext.accountFilter);
+    if (initialContext.algoFilter !== undefined) setSelectedAlgoId(initialContext.algoFilter);
+    if (initialContext.scrollTo) {
+      requestAnimationFrame(() => {
+        const scrollTarget = initialContext.scrollTo === "history" ? "orders" : initialContext.scrollTo;
+        const el = document.getElementById(`trading-anchor-${scrollTarget}`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+    onContextConsumed?.();
+  }, [initialContext, onContextConsumed]);
 
   const runningAlgos = algos.filter((a) => activeRuns.some((r) => r.algo_id === a.id));
 
@@ -327,6 +343,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
 
       {/* Top Row: P&L + Stats */}
       <div className="flex gap-3">
+        <div id="trading-anchor-stats" />
         <div className="flex-1 grid grid-cols-3 gap-4 p-4 bg-[var(--bg-panel)] rounded-lg">
           <PnlCard label="Realized P&L" value={animatedRealized} />
           <PnlCard label="Unrealized P&L" value={animatedUnrealized} />
@@ -359,6 +376,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
       {/* Bottom Row: Positions + Orders */}
       <div className="flex gap-3 flex-1 min-h-0">
         <div className="flex-1 bg-[var(--bg-panel)] rounded-lg flex flex-col overflow-hidden">
+          <div id="trading-anchor-positions" />
           <div className="px-4 py-2.5 border-b border-[var(--border)]">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Open Positions
@@ -407,6 +425,7 @@ export const TradingView = ({ simulation, algos, activeRuns }: TradingViewProps)
         </div>
 
         <div className="flex-1 bg-[var(--bg-panel)] rounded-lg flex flex-col overflow-hidden">
+          <div id="trading-anchor-orders" />
           <div className="px-4 py-2.5 border-b border-[var(--border)]">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Recent Orders

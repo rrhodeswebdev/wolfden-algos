@@ -252,11 +252,6 @@ export const App = () => {
     setPendingNavContext(null);
   }, []);
 
-  // Referenced here so the scaffolded-but-unwired nav plumbing doesn't trip
-  // `noUnusedLocals`. Task 2 consumes both values from the view props directly;
-  // this line can be removed then.
-  void pendingNavContext; void clearPendingNavContext;
-
   const handleSelectAlgo = (id: number) => {
     if (id === selectedAlgoId) return;
     if (hasUnsavedChanges) {
@@ -433,7 +428,13 @@ export const App = () => {
       )}
 
       {activeView === "trading" && (
-        <TradingView simulation={simulation} algos={algos} activeRuns={activeRuns} />
+        <TradingView
+          simulation={simulation}
+          algos={algos}
+          activeRuns={activeRuns}
+          initialContext={pendingNavContext}
+          onContextConsumed={clearPendingNavContext}
+        />
       )}
 
       {aiTerminalAlgos.length > 0 && (
