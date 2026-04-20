@@ -46,16 +46,8 @@ export const computeStatus = (errors: InstanceErrors | undefined): InstanceStatu
 export const aggregatePnl = (instances: InstanceView[]): number =>
   instances.reduce((sum, i) => sum + (i.stats?.pnl ?? 0), 0);
 
-export const sparklinePoints = (history: number[], width: number, height: number): string => {
-  if (history.length <= 1) return "";
-  const min = Math.min(...history);
-  const max = Math.max(...history);
-  const range = max - min || 1;
-  const stepX = width / (history.length - 1);
-  return history
-    .map((v, i) => `${(i * stepX).toFixed(2)},${(height - ((v - min) / range) * height).toFixed(2)}`)
-    .join(" ");
-};
+// Shared renderers live in ./format; re-export so callers keep their imports stable.
+export { formatPnl, pnlColorClass, sparklinePoints } from "./format";
 
 export const passesFilters = (inst: InstanceView, filters: ViewFilters): boolean => {
   if (filters.mode !== "all" && inst.run.mode !== filters.mode) return false;
@@ -198,17 +190,3 @@ export const buildGroups = (args: BuildArgs): GroupView[] => {
   return groups;
 };
 
-export const formatPnl = (value: number): string => {
-  const sign = value >= 0 ? "+" : "";
-  return `${sign}$${Math.abs(value).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
-
-export const pnlColorClass = (value: number): string =>
-  value > 0
-    ? "text-[var(--accent-green)]"
-    : value < 0
-      ? "text-[var(--accent-red)]"
-      : "text-[var(--text-primary)]";
