@@ -13,6 +13,9 @@ import { RenameDialog } from "./components/RenameDialog";
 import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
+import { useTradeHistory } from "./hooks/useTradeHistory";
+import { useEquityTimeline } from "./hooks/useEquityTimeline";
+import { useRollingMetrics } from "./hooks/useRollingMetrics";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import { useAlgoLogs } from "./hooks/useAlgoLogs";
 import { useAlgoHealth } from "./hooks/useAlgoHealth";
@@ -50,6 +53,9 @@ export const App = () => {
   const [venvReady, setVenvReady] = useState<boolean | null>(null);
 
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
+  const tradeHistory = useTradeHistory(algos, activeRuns);
+  const equity = useEquityTimeline(tradeHistory.roundtrips);
+  const rolling = useRollingMetrics(tradeHistory.roundtrips);
 
   const handleAutoStop = useCallback(async (instanceId: string) => {
     toast.error(`Algo instance ${instanceId.slice(0, 8)}... halted due to repeated errors`);
@@ -419,10 +425,16 @@ export const App = () => {
         {activeView === "trading" && (
           <TradingView
             simulation={simulation}
+            tradeHistory={tradeHistory}
+            equity={equity}
+            rolling={rolling}
             algos={algos}
             activeRuns={activeRuns}
+            dataSources={dataSources}
+            accounts={accounts}
             initialContext={pendingNavContext}
             onContextConsumed={clearPendingNavContext}
+            onNavigate={handleNavigate}
           />
         )}
 
