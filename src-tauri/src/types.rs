@@ -161,6 +161,22 @@ pub enum NtInbound {
         error: Option<String>,
         timestamp: Option<i64>,
     },
+    #[serde(rename = "trade")]
+    Trade {
+        source_id: String,
+        symbol: String,
+        side: String,
+        qty: i64,
+        entry_price: f64,
+        exit_price: f64,
+        exit_time: i64,
+        pnl: f64,
+        gross_pnl: f64,
+        commission: f64,
+        flattens: bool,
+        order_id: String,
+        instance_id: String,
+    },
     #[serde(rename = "history")]
     History {
         source_id: String,

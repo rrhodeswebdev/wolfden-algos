@@ -6,12 +6,12 @@ import type {
   Position,
 } from "../hooks/useTradingSimulation";
 import type { TradeHistory } from "../hooks/useTradeHistory";
-import type { EquityTimeline } from "../hooks/useEquityTimeline";
 import type { RollingMetrics } from "../hooks/useRollingMetrics";
 import {
   type Filters,
   type Roundtrip,
   type DrawdownPoint,
+  type EquityPoint,
   EMPTY_FILTERS,
   applyFilters,
   aggregateByKey,
@@ -38,7 +38,6 @@ type AccountSummary = {
 type TradingViewProps = {
   simulation: TradingSimulation;
   tradeHistory: TradeHistory;
-  equity: EquityTimeline;
   rolling: RollingMetrics;
   algos: Algo[];
   activeRuns: AlgoRun[];
@@ -61,6 +60,20 @@ const drawdownFromRoundtrips = (trips: Roundtrip[]): DrawdownPoint[] => {
     cum += r.pnl;
     if (cum > peak) peak = cum;
     out.push({ t: r.closeTimestamp, peak, pnl: cum, underwater: peak - cum });
+  }
+  return out;
+};
+
+// Build a cumulative equity series from closed roundtrips. The hero chart uses this
+// (instead of useEquityTimeline's account-level feed) so stopped-algo history and
+// manual NT trades don't show up on the "active algos" view.
+const equityFromRoundtrips = (trips: Roundtrip[]): EquityPoint[] => {
+  const sorted = [...trips].sort((a, b) => a.closeTimestamp - b.closeTimestamp);
+  let cum = 0;
+  const out: EquityPoint[] = [{ t: sorted[0]?.openTimestamp ?? Date.now(), pnl: 0 }];
+  for (const r of sorted) {
+    cum += r.pnl;
+    out.push({ t: r.closeTimestamp, pnl: Math.round(cum * 100) / 100 });
   }
   return out;
 };
@@ -91,7 +104,6 @@ const useOpenSinceMap = (positions: Position[]): Map<string, number> => {
 export const TradingView = ({
   simulation,
   tradeHistory,
-  equity,
   rolling,
   algos,
   activeRuns,
@@ -165,18 +177,39 @@ export const TradingView = ({
     [tradeHistory.heatmap, filteredRoundtrips, isFilterOn],
   );
 
-  // Drawdown for hero KPIs + overlay: always derive from the (filtered) roundtrip set.
-  // This keeps the hero internally consistent — realized / Sharpe / max DD all come
-  // from the same source, whether or not a filter is active. The raw `equity.liveDrawdown`
-  // from nt-account is still available to callers that want live-account-only drawdown.
-  const filteredDrawdown = useMemo(
-    () => drawdownFromRoundtrips(filteredRoundtrips),
-    [filteredRoundtrips],
+  // Hero + equity chart scope: only currently-active algo instances. The drill-down
+  // tabs below still see the full session (filteredRoundtrips), but the top-of-page
+  // snapshot reflects what running algos are doing right now — excludes closed trades
+  // from algos the user has since stopped, and excludes manual/account-level NT activity.
+  const activeInstanceIds = useMemo(
+    () => new Set(activeRuns.map((r) => r.instance_id)),
+    [activeRuns],
+  );
+  const activeChartAccountKeys = useMemo(
+    () => new Set(activeRuns.map((r) => `${r.data_source_id}:${r.account}`)),
+    [activeRuns],
+  );
+  const heroRoundtrips = useMemo(
+    () => filteredRoundtrips.filter((r) => activeInstanceIds.has(r.instanceId)),
+    [filteredRoundtrips, activeInstanceIds],
+  );
+  const heroPositions = useMemo(
+    () => filteredPositions.filter((p) => activeChartAccountKeys.has(`${p.dataSourceId}:${p.account}`)),
+    [filteredPositions, activeChartAccountKeys],
+  );
+  const heroDrawdown = useMemo(() => drawdownFromRoundtrips(heroRoundtrips), [heroRoundtrips]);
+  const heroEquityLive = useMemo(
+    () => equityFromRoundtrips(heroRoundtrips.filter((r) => !r.isShadow)),
+    [heroRoundtrips],
+  );
+  const heroEquityShadow = useMemo(
+    () => equityFromRoundtrips(heroRoundtrips.filter((r) => r.isShadow)),
+    [heroRoundtrips],
   );
 
   const heroKpis = useMemo(
-    () => deriveHeroKpis(filteredRoundtrips, filteredPositions, filteredDrawdown),
-    [filteredRoundtrips, filteredPositions, filteredDrawdown],
+    () => deriveHeroKpis(heroRoundtrips, heroPositions, heroDrawdown),
+    [heroRoundtrips, heroPositions, heroDrawdown],
   );
 
   const openSinceByPosKey = useOpenSinceMap(simulation.positions);
@@ -198,9 +231,9 @@ export const TradingView = ({
 
       <TradingHero
         kpis={heroKpis}
-        equityLive={equity.live}
-        equityShadow={equity.shadow}
-        drawdown={filteredDrawdown}
+        equityLive={heroEquityLive}
+        equityShadow={heroEquityShadow}
+        drawdown={heroDrawdown}
       />
 
       <TradingTabs activeTab={activeTab} onChange={setActiveTab} />

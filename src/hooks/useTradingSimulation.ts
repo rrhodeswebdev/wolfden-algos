@@ -151,6 +151,23 @@ type AccountSnapshot = {
   realized_pnl: number;
 };
 
+type TradeEvent = {
+  source_id: string;
+  account: string;
+  symbol: string;
+  side: "Long" | "Short";
+  qty: number;
+  entry_price: number;
+  exit_price: number;
+  exit_time: number;
+  pnl: number;
+  gross_pnl: number;
+  commission: number;
+  flattens: boolean;
+  order_id: string;
+  instance_id: string;
+};
+
 type CompletedTrade = {
   pnl: number;
 };
@@ -207,10 +224,18 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
   const [shadowCompletedTrades, setShadowCompletedTrades] = useState<CompletedTrade[]>([]);
   const [backtestStats, setBacktestStats] = useState<Record<string, AlgoStats & { label?: string }>>({});
   const nextOrderId = useRef(1);
-  // Track last known P&L per position key so we can record it on close
+  // Track last known unrealized P&L per position key (used as fallback for shadow accounts)
   const positionPnlRef = useRef<Map<string, number>>(new Map());
+  // NT-reported realized P&L accumulated per open position (authoritative for live accounts)
+  const ntPnlRef = useRef<Map<string, number>>(new Map());
+  const ntTradeCountRef = useRef<Map<string, number>>(new Map());
+  // Live positions whose Flat event arrived before nt-trade — we defer recording the
+  // completed trade until the NT-reported P&L lands (or the timeout expires).
+  const pendingCloseRef = useRef<Map<string, { isShadow: boolean; timeoutId: ReturnType<typeof setTimeout> }>>(new Map());
   // Track which positions are shadow (by posKey)
   const shadowPositionKeys = useRef<Set<string>>(new Set());
+
+  const TRADE_WAIT_MS_SIM = 3000;
   // Ref to avoid stale closures in the sampling interval
   const realizedPnlRef = useRef(0);
 
@@ -234,6 +259,46 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
     return () => { unlisten.then((f) => f()); };
   }, []);
 
+  // Record a completed trade into the stats pipeline. Called either when Flat + nt-trade
+  // have both arrived, or when the post-Flat timeout expires and we fall back to the
+  // unrealized snapshot. Separated from the Flat handler so the UI position removal can
+  // happen immediately while the stat recording waits for NT's authoritative number.
+  const recordCompletedTrade = (posKey: string, isShadow: boolean) => {
+    const pending = pendingCloseRef.current.get(posKey);
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      pendingCloseRef.current.delete(posKey);
+    }
+    const ntCount = ntTradeCountRef.current.get(posKey) ?? 0;
+    const ntPnl = ntPnlRef.current.get(posKey) ?? 0;
+    const lastPnl = positionPnlRef.current.get(posKey) ?? 0;
+    const tradePnl = !isShadow && ntCount > 0 ? ntPnl : lastPnl;
+    if (tradePnl !== 0) {
+      if (isShadow) {
+        setShadowCompletedTrades((prev) => {
+          const next = [...prev, { pnl: tradePnl }];
+          return next.length > 1000 ? next.slice(-1000) : next;
+        });
+        const newTotal = Math.round((shadowRealizedPnlRef.current + tradePnl) * 100) / 100;
+        setShadowRealizedPnl(newTotal);
+        shadowRealizedPnlRef.current = newTotal;
+        setShadowPnlHistory((h) => {
+          const next = [...h, newTotal];
+          return next.length > 500 ? next.slice(-500) : next;
+        });
+      } else {
+        setCompletedTrades((prev) => {
+          const next = [...prev, { pnl: tradePnl }];
+          return next.length > 1000 ? next.slice(-1000) : next;
+        });
+      }
+    }
+    positionPnlRef.current.delete(posKey);
+    ntPnlRef.current.delete(posKey);
+    ntTradeCountRef.current.delete(posKey);
+    shadowPositionKeys.current.delete(posKey);
+  };
+
   // Listen for position updates from NinjaTrader
   useEffect(() => {
     const unlisten = listen<PositionEvent>("nt-position", (event) => {
@@ -243,34 +308,20 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
       const isShadow = p.account === "shadow";
 
       if (p.direction === "Flat" || p.qty === 0) {
-        // Position closed — record the completed trade
-        const lastPnl = positionPnlRef.current.get(posKey) ?? 0;
-        if (lastPnl !== 0) {
-          if (isShadow) {
-            setShadowCompletedTrades((prev) => {
-              const next = [...prev, { pnl: lastPnl }];
-              return next.length > 1000 ? next.slice(-1000) : next;
-            });
-            const newTotal = Math.round((shadowRealizedPnlRef.current + lastPnl) * 100) / 100;
-            setShadowRealizedPnl(newTotal);
-            shadowRealizedPnlRef.current = newTotal;
-            setShadowPnlHistory((h) => {
-              const next = [...h, newTotal];
-              return next.length > 500 ? next.slice(-500) : next;
-            });
-          } else {
-            setCompletedTrades((prev) => {
-              const next = [...prev, { pnl: lastPnl }];
-              return next.length > 1000 ? next.slice(-1000) : next;
-            });
-          }
-        }
-        positionPnlRef.current.delete(posKey);
-        shadowPositionKeys.current.delete(posKey);
-
+        // Remove the live position from the UI immediately.
         setPositions((prev) => prev.filter(
           (pos) => !(pos.dataSourceId === p.source_id && pos.symbol === p.symbol)
         ));
+
+        // Record the completed trade. For shadow or already-arrived NT trade: record now.
+        // For live waiting on nt-trade: defer up to TRADE_WAIT_MS_SIM so stats reflect NT's number.
+        const ntCount = ntTradeCountRef.current.get(posKey) ?? 0;
+        if (isShadow || ntCount > 0) {
+          recordCompletedTrade(posKey, isShadow);
+        } else {
+          const timeoutId = setTimeout(() => recordCompletedTrade(posKey, false), TRADE_WAIT_MS_SIM);
+          pendingCloseRef.current.set(posKey, { isShadow: false, timeoutId });
+        }
         return;
       }
 
@@ -304,6 +355,23 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
         }
         return [...prev, newPos];
       });
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, []);
+
+  // Listen for NT-reported trade P&L (authoritative realized P&L for the roundtrip).
+  // If Flat already arrived and we're waiting on this event, finalize now instead of
+  // letting the timeout fall back to the unrealized snapshot.
+  useEffect(() => {
+    const unlisten = listen<TradeEvent>("nt-trade", (event) => {
+      const t = event.payload;
+      const posKey = `${t.source_id}:${t.symbol}`;
+      ntPnlRef.current.set(posKey, (ntPnlRef.current.get(posKey) ?? 0) + t.pnl);
+      ntTradeCountRef.current.set(posKey, (ntTradeCountRef.current.get(posKey) ?? 0) + 1);
+      const pending = pendingCloseRef.current.get(posKey);
+      if (pending) {
+        recordCompletedTrade(posKey, pending.isShadow);
+      }
     });
     return () => { unlisten.then((f) => f()); };
   }, []);
