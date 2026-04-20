@@ -13,9 +13,9 @@ type LiveTabProps = {
   positions: Position[];
   orders: SimOrder[];
   accounts: Record<string, AccountSummary>;
-  // Map posKey ("dataSourceId:symbol:account") → open-since timestamp; provided by useTradeHistory
-  // so position cards can render "held Xm" consistently. If a card has no entry in the map,
-  // fallback to "--" via null.
+  // Map posKey ("dataSourceId:symbol:account") → open-since timestamp; maintained by the
+  // parent (TradingView's `useOpenSinceMap`) so position cards can render "held Xm"
+  // consistently. If a card has no entry in the map, fallback to "--" via null.
   openSinceByPosKey: Map<string, number>;
 };
 

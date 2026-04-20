@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import type { Algo, AlgoRun, NavContext, View, NavOptions } from "../types";
 import type {
   TradingSimulation,
@@ -19,6 +19,7 @@ import {
   buildDistribution,
   buildHeatmap,
   deriveHeroKpis,
+  isFilterActive,
 } from "../lib/tradingView";
 import { TradingFilterBar } from "../components/TradingFilterBar";
 import { TradingHero } from "../components/TradingHero";
@@ -48,9 +49,9 @@ type TradingViewProps = {
   onNavigate: (view: View, options?: NavOptions) => void;
 };
 
-// Build a drawdown series from the currently-filtered roundtrips (used when a filter
-// is active; the hook's `equity.liveDrawdown` follows nt-account realized P&L across
-// all accounts and can't be narrowed after the fact).
+// Build a drawdown series from the closed roundtrips. Used for the hero's Max DD
+// and as the drawdown overlay source — consistent with how the hero's realized/
+// total P&L and trade metrics are derived (all from the same roundtrip set).
 const drawdownFromRoundtrips = (trips: Roundtrip[]): DrawdownPoint[] => {
   const sorted = [...trips].sort((a, b) => a.closeTimestamp - b.closeTimestamp);
   let peak = 0;
@@ -64,12 +65,15 @@ const drawdownFromRoundtrips = (trips: Roundtrip[]): DrawdownPoint[] => {
   return out;
 };
 
-// Position cards need "open since" timestamps — we track them here (not in the hook)
-// because the hook only keeps MAE/MFE samples, not the open time as a separate datum
-// that's available synchronously at render. We rebuild the map from the current positions.
+// Position cards need "open since" timestamps. The simulation hook only carries the
+// current unrealized P&L, not the moment a position opened. We shadow-track first-seen
+// timestamps here at render time so new positions get their timestamp synchronously
+// (useMemo rather than useEffect avoids the first-frame staleness that would leave a
+// just-opened card showing "--" for its hold duration).
 const useOpenSinceMap = (positions: Position[]): Map<string, number> => {
-  const [map] = useState(() => new Map<string, number>());
-  useEffect(() => {
+  const mapRef = useRef(new Map<string, number>());
+  return useMemo(() => {
+    const map = mapRef.current;
     const seen = new Set<string>();
     const now = Date.now();
     for (const p of positions) {
@@ -80,8 +84,8 @@ const useOpenSinceMap = (positions: Position[]): Map<string, number> => {
     for (const key of Array.from(map.keys())) {
       if (!seen.has(key)) map.delete(key);
     }
-  }, [positions, map]);
-  return map;
+    return map;
+  }, [positions]);
 };
 
 export const TradingView = ({
@@ -114,8 +118,7 @@ export const TradingView = ({
 
     if (initialContext.scrollTo) {
       const target = initialContext.scrollTo;
-      if (target === "positions") setActiveTab("live");
-      else if (target === "orders") setActiveTab("live");
+      if (target === "positions" || target === "orders") setActiveTab("live");
       else if (target === "history") setActiveTab("trades");
       // "stats" stays on whatever tab we're on — hero is always visible.
     }
@@ -135,8 +138,7 @@ export const TradingView = ({
     () => applyFilters(tradeHistory.roundtrips, filters),
     [tradeHistory.roundtrips, filters],
   );
-  const isFilterOn =
-    filters.chart !== null || filters.account !== null || filters.algo !== null;
+  const isFilterOn = isFilterActive(filters);
 
   const filteredByAlgo = useMemo(
     () => (isFilterOn ? aggregateByKey(filteredRoundtrips, "algo") : tradeHistory.byAlgo),
@@ -163,11 +165,13 @@ export const TradingView = ({
     [tradeHistory.heatmap, filteredRoundtrips, isFilterOn],
   );
 
-  // Drawdown follows the filtered roundtrips when a filter is set; otherwise use the
-  // hook's raw live drawdown series (which tracks the nt-account realized P&L).
+  // Drawdown for hero KPIs + overlay: always derive from the (filtered) roundtrip set.
+  // This keeps the hero internally consistent — realized / Sharpe / max DD all come
+  // from the same source, whether or not a filter is active. The raw `equity.liveDrawdown`
+  // from nt-account is still available to callers that want live-account-only drawdown.
   const filteredDrawdown = useMemo(
-    () => (isFilterOn ? drawdownFromRoundtrips(filteredRoundtrips) : equity.liveDrawdown),
-    [equity.liveDrawdown, filteredRoundtrips, isFilterOn],
+    () => drawdownFromRoundtrips(filteredRoundtrips),
+    [filteredRoundtrips],
   );
 
   const heroKpis = useMemo(
