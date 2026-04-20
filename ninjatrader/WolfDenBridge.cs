@@ -40,6 +40,32 @@ namespace NinjaTrader.NinjaScript.Strategies
         private DateTime                                    _lastAccountSend = DateTime.MinValue;
         private DateTime                                    _lastPositionSend = DateTime.MinValue;
 
+        // Pre-Flat position snapshot. Updated by OnPositionUpdate so its values remain
+        // available when we emit the trade on the next transition back to Flat.
+        private MarketPosition                              _lastPosMarketPos = MarketPosition.Flat;
+        private int                                         _lastPosQty;
+        private double                                      _lastPosAvgPrice;
+
+        // NT-authoritative per-trade P&L tracking. We snapshot the account's realized P&L
+        // when a position opens and subtract that snapshot from the updated realized P&L after
+        // it closes — so the emitted `pnl` matches NT's own trade accounting (commission,
+        // exchange fees, slippage all included). The emit is deferred to the first
+        // RealizedProfitLoss update following Flat, since NT can post the P&L update either
+        // before OR after OnPositionUpdate fires.
+        private double                                      _realizedPnlAtOpen;
+        private bool                                        _positionWasOpen;
+        private bool                                        _emitTradeOnNextRealizedUpdate;
+        private string                                      _pendingSide;
+        private int                                         _pendingQty;
+        private double                                      _pendingEntryPrice;
+
+        // Captures the most recent closing fill so the trade message carries the real exit
+        // price/time/order attribution (averagePrice at Flat is 0).
+        private double                                      _lastExitPrice;
+        private DateTime                                    _lastExitTime = DateTime.MinValue;
+        private string                                      _lastExitOrderId;
+        private string                                      _lastExitInstanceId;
+
         private bool                                        _isRealtime;
 
         // Pre-built history JSON (built on NinjaScript thread, sent from background task)
@@ -379,6 +405,23 @@ namespace NinjaTrader.NinjaScript.Strategies
                 "remaining",      execution.Order.Quantity - execution.Order.Filled,
                 "timestamp",      ToUnixMs(time)
             ));
+
+            // Remember the most recent closing fill so the deferred trade emit (in
+            // OnPositionUpdate/OnAccountItemUpdate) can carry the real exit price, time,
+            // and algo attribution. Closing = execution side opposite of current position side.
+            if (_lastPosMarketPos != MarketPosition.Flat)
+            {
+                bool isClosingExec =
+                    (_lastPosMarketPos == MarketPosition.Long  && marketPosition == MarketPosition.Short) ||
+                    (_lastPosMarketPos == MarketPosition.Short && marketPosition == MarketPosition.Long);
+                if (isClosingExec)
+                {
+                    _lastExitPrice      = price;
+                    _lastExitTime       = time;
+                    _lastExitOrderId    = wolfDenId;
+                    _lastExitInstanceId = instanceId;
+                }
+            }
         }
 
         protected override void OnPositionUpdate(Position position, double averagePrice,
@@ -410,6 +453,63 @@ namespace NinjaTrader.NinjaScript.Strategies
                 "avg_price",      averagePrice,
                 "unrealized_pnl", unrealizedPnl
             ));
+
+            // Position lifecycle tracking for NT-authoritative trade P&L emission.
+            if (marketPosition != MarketPosition.Flat && !_positionWasOpen)
+            {
+                // Position just opened — snapshot account realized P&L as baseline.
+                _realizedPnlAtOpen = _cachedRealizedPnl;
+                _positionWasOpen   = true;
+            }
+            else if (marketPosition == MarketPosition.Flat && _positionWasOpen)
+            {
+                // Position just closed — capture the pre-Flat side/qty/avg price from the
+                // last non-Flat snapshot, then defer the trade emit until RealizedPnL refreshes.
+                _pendingSide       = _lastPosMarketPos == MarketPosition.Long ? "Long" : "Short";
+                _pendingQty        = _lastPosQty;
+                _pendingEntryPrice = _lastPosAvgPrice;
+                _emitTradeOnNextRealizedUpdate = true;
+                _positionWasOpen   = false;
+                // If the account update already fired before this Flat event, the delta is
+                // already correct — emit immediately rather than waiting.
+                if (_cachedRealizedPnl != _realizedPnlAtOpen)
+                    EmitPendingTrade();
+            }
+
+            // Record post-update snapshot (used by OnExecutionUpdate for closing-side detection).
+            _lastPosMarketPos = marketPosition;
+            _lastPosQty       = quantity;
+            _lastPosAvgPrice  = averagePrice;
+        }
+
+        private void EmitPendingTrade()
+        {
+            if (!_emitTradeOnNextRealizedUpdate) return;
+            if (_ws == null || !_ws.IsConnected) return;
+
+            double netPnl = _cachedRealizedPnl - _realizedPnlAtOpen;
+            long exitTimeMs = _lastExitTime == DateTime.MinValue
+                ? ToUnixMs(DateTime.UtcNow)
+                : ToUnixMs(_lastExitTime);
+
+            _ws.Send(Json.Build(
+                "type",        "trade",
+                "source_id",   _sourceId,
+                "symbol",      _symbol,
+                "side",        _pendingSide ?? "",
+                "qty",         _pendingQty,
+                "entry_price", _pendingEntryPrice,
+                "exit_price",  _lastExitPrice,
+                "exit_time",   exitTimeMs,
+                "pnl",         netPnl,
+                "gross_pnl",   netPnl,
+                "commission",  0.0,
+                "flattens",    true,
+                "order_id",    _lastExitOrderId ?? "",
+                "instance_id", _lastExitInstanceId ?? ""
+            ));
+
+            _emitTradeOnNextRealizedUpdate = false;
         }
 
         protected override void OnAccountItemUpdate(Account account, AccountItem accountItem, double value)
@@ -420,7 +520,12 @@ namespace NinjaTrader.NinjaScript.Strategies
             {
                 case AccountItem.BuyingPower:           _cachedBuyingPower  = value; break;
                 case AccountItem.CashValue:             _cachedCash         = value; break;
-                case AccountItem.RealizedProfitLoss:    _cachedRealizedPnl  = value; break;
+                case AccountItem.RealizedProfitLoss:
+                    _cachedRealizedPnl = value;
+                    // Emit pending trade as soon as NT posts the updated realized P&L —
+                    // this is the earliest moment commission + fees are baked in.
+                    if (_emitTradeOnNextRealizedUpdate) EmitPendingTrade();
+                    break;
                 default: return;
             }
 
@@ -1224,8 +1329,8 @@ namespace NinjaTrader.NinjaScript.Strategies
                 string dummy;
                 _orderToId.TryRemove(order, out dummy);
             }
-            string dummy2;
-            _idToInstance.TryRemove(wolfDenId, out dummy2);
+            // Keep _idToInstance alive so trade messages emitted after order finalization
+            // can still resolve back to the originating algo instance.
         }
     }
 

@@ -46,6 +46,27 @@ pub struct PositionEvent {
     pub unrealized_pnl: f64,
 }
 
+/// Realized trade event emitted to the frontend. Sourced from NinjaTrader's per-execution
+/// P&L computation in the bridge — authoritative relative to the locally-derived unrealized
+/// snapshot the frontend previously used.
+#[derive(Debug, Clone, Serialize)]
+pub struct TradeEvent {
+    pub source_id: String,
+    pub account: String,
+    pub symbol: String,
+    pub side: String,
+    pub qty: i64,
+    pub entry_price: f64,
+    pub exit_price: f64,
+    pub exit_time: i64,
+    pub pnl: f64,
+    pub gross_pnl: f64,
+    pub commission: f64,
+    pub flattens: bool,
+    pub order_id: String,
+    pub instance_id: String,
+}
+
 /// Order update emitted to the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct OrderEvent {
@@ -262,6 +283,34 @@ pub async fn start(
                                                 .unwrap_or_default()
                                                 .as_millis() as i64,
                                         }));
+                                    }
+                                }
+
+                                // On Trade (NT-computed realized P&L), emit with connection's account name
+                                if let NtInbound::Trade {
+                                    ref source_id, ref symbol, ref side, qty,
+                                    entry_price, exit_price, exit_time,
+                                    pnl, gross_pnl, commission, flattens,
+                                    ref order_id, ref instance_id,
+                                } = parsed {
+                                    let acct = account_name.read().await;
+                                    if let Some(ref name) = *acct {
+                                        let _ = app_handle.emit("nt-trade", TradeEvent {
+                                            source_id: source_id.clone(),
+                                            account: name.clone(),
+                                            symbol: symbol.clone(),
+                                            side: side.clone(),
+                                            qty,
+                                            entry_price,
+                                            exit_price,
+                                            exit_time,
+                                            pnl,
+                                            gross_pnl,
+                                            commission,
+                                            flattens,
+                                            order_id: order_id.clone(),
+                                            instance_id: instance_id.clone(),
+                                        });
                                     }
                                 }
 
