@@ -31,8 +31,8 @@ export const RiskSummary = ({ positions, accounts }: RiskSummaryProps) => {
   const openRisk = positions.reduce((s, p) => s + (p.pnl < 0 ? Math.abs(p.pnl) : 0), 0);
   const openPositions = positions.length;
   const portfolioHeat =
-    totalBuyingPower > 0 ? ((openRisk / totalBuyingPower) * 100).toFixed(2) : "--";
-  const marginUsed = totalBuyingPower > 0 ? ((openRisk / totalBuyingPower) * 100).toFixed(0) : "--";
+    totalBuyingPower > 0 ? ((openRisk / totalBuyingPower) * 100).toFixed(2) : "—";
+  const marginUsed = totalBuyingPower > 0 ? ((openRisk / totalBuyingPower) * 100).toFixed(0) : "—";
 
   return (
     <div className="grid grid-cols-5 gap-4 p-3 bg-[var(--bg-panel)] rounded-lg">
@@ -43,13 +43,13 @@ export const RiskSummary = ({ positions, accounts }: RiskSummaryProps) => {
       />
       <Cell
         label="Portfolio Heat"
-        value={portfolioHeat === "--" ? "--" : `${portfolioHeat}%`}
+        value={portfolioHeat === "—" ? "—" : `${portfolioHeat}%`}
       />
       <Cell
         label="Buying Power"
-        value={totalBuyingPower > 0 ? formatDollars(totalBuyingPower) : "--"}
+        value={totalBuyingPower > 0 ? formatDollars(totalBuyingPower) : "—"}
       />
-      <Cell label="Margin Used" value={marginUsed === "--" ? "--" : `${marginUsed}%`} />
+      <Cell label="Margin Used" value={marginUsed === "—" ? "—" : `${marginUsed}%`} />
       <Cell label="Open Positions" value={`${openPositions}`} />
     </div>
   );

@@ -29,12 +29,12 @@ export const TradingHero = ({ kpis, equityLive, equityShadow, drawdown }: Tradin
         <Kpi label="Realized" value={formatDollars(kpis.realizedPnl)} tone={pnlColorClass(kpis.realizedPnl)} />
         <Kpi label="Unrealized" value={formatDollars(kpis.unrealizedPnl)} tone={pnlColorClass(kpis.unrealizedPnl)} />
         <Kpi label="Total" value={formatDollars(kpis.totalPnl)} tone={pnlColorClass(kpis.totalPnl)} />
-        <Kpi label="Win Rate" value={kpis.trades > 0 ? `${kpis.winRate}%` : "--"} />
+        <Kpi label="Win Rate" value={kpis.trades > 0 ? `${kpis.winRate}%` : "—"} />
         <Kpi label="Trades" value={`${kpis.trades}`} />
         <Kpi label="Sharpe" value={kpis.sharpe} />
         <Kpi
           label="Max DD"
-          value={kpis.maxDrawdown > 0 ? `-$${kpis.maxDrawdown.toFixed(2)}` : "--"}
+          value={kpis.maxDrawdown > 0 ? `-$${kpis.maxDrawdown.toFixed(2)}` : "—"}
           tone={kpis.maxDrawdown > 0 ? "text-[var(--accent-red)]" : ""}
         />
       </div>

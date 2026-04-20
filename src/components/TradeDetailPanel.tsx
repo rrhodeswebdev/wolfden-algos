@@ -89,6 +89,7 @@ export const TradeDetailPanel = ({ roundtrip, onClose }: TradeDetailPanelProps) 
           onClick={onClose}
           className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-lg leading-none"
           title="Close (Esc)"
+          aria-label="Close trade detail"
         >
           ×
         </button>

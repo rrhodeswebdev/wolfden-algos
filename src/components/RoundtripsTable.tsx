@@ -91,7 +91,7 @@ export const RoundtripsTable = ({
                     <td className="px-3 py-2 text-[var(--text-secondary)]">
                       {r.isShadow ? (
                         <span className="text-[10px] px-2 py-0.5 rounded bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]">
-                          shadow
+                          Shadow
                         </span>
                       ) : (
                         r.account

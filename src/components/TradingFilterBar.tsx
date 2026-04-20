@@ -136,7 +136,7 @@ export const TradingFilterBar = ({
                 active={filters.account === acc}
                 onClick={() => setAccount(filters.account === acc ? null : acc)}
               >
-                {acc === "shadow" ? "shadow" : acc}
+                {acc}
               </Chip>
             ))}
           </div>

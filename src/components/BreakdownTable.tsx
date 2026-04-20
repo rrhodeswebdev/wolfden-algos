@@ -57,7 +57,7 @@ export const BreakdownTable = ({
                   <td className="px-4 py-2 font-medium">
                     {row.label === "shadow" ? (
                       <span className="text-[10px] px-2 py-0.5 rounded bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]">
-                        shadow
+                        Shadow
                       </span>
                     ) : (
                       row.label
@@ -99,6 +99,7 @@ export const BreakdownTable = ({
                         onClick={() => onRowDeepLink(row)}
                         className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent-blue)] transition-colors"
                         title={deepLinkLabel}
+                        aria-label={deepLinkLabel ?? "Open"}
                       >
                         →
                       </button>

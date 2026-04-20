@@ -11,7 +11,7 @@ export const PositionCard = ({ position, openSinceTs }: PositionCardProps) => {
   const isShadow = position.account === "shadow";
   const sideColor = position.side === "Long" ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]";
   const now = Date.now();
-  const held = openSinceTs ? formatDuration(openSinceTs, now) : "--";
+  const held = openSinceTs ? formatDuration(openSinceTs, now) : "—";
 
   return (
     <div className="flex-1 min-w-[240px] bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg p-3">

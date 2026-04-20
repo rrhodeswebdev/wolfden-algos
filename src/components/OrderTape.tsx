@@ -70,7 +70,7 @@ export const OrderTape = ({ orders }: OrderTapeProps) => {
                   <td className="px-4 py-2 text-[var(--text-secondary)]">
                     {o.account === "shadow" ? (
                       <span className="text-[10px] px-2 py-0.5 rounded bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]">
-                        shadow
+                        Shadow
                       </span>
                     ) : (
                       o.account
