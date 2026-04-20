@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { DEFAULT_ALGO } from "./components/AlgoEditor";
@@ -14,7 +14,6 @@ import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import { useTradeHistory } from "./hooks/useTradeHistory";
-import { useEquityTimeline } from "./hooks/useEquityTimeline";
 import { useRollingMetrics } from "./hooks/useRollingMetrics";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import { useAlgoLogs } from "./hooks/useAlgoLogs";
@@ -54,8 +53,16 @@ export const App = () => {
 
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
   const tradeHistory = useTradeHistory(algos, activeRuns);
-  const equity = useEquityTimeline(tradeHistory.roundtrips);
   const rolling = useRollingMetrics(tradeHistory.roundtrips);
+
+  // Merge backtest stats (from useTradingSimulation) with live roundtrip-derived stats
+  // (from useTradeHistory). Live overrides backtest once the instance has closed trades.
+  // runPnlHistories likewise comes from live roundtrips; the simulation hook returns {}.
+  const mergedAlgoStats = useMemo(
+    () => ({ ...simulation.algoStats, ...tradeHistory.statsByInstance }),
+    [simulation.algoStats, tradeHistory.statsByInstance],
+  );
+  const mergedRunPnlHistories = tradeHistory.pnlHistoryByInstance;
 
   const handleAutoStop = useCallback(async (instanceId: string) => {
     toast.error(`Algo instance ${instanceId.slice(0, 8)}... halted due to repeated errors`);
@@ -377,8 +384,8 @@ export const App = () => {
             stats={simulation.stats}
             positions={simulation.positions}
             pnlHistory={simulation.pnlHistory}
-            runPnlHistories={simulation.runPnlHistories}
-            algoStats={simulation.algoStats}
+            runPnlHistories={mergedRunPnlHistories}
+            algoStats={mergedAlgoStats}
             onNavigate={handleNavigate}
             onStopAlgo={handleStopAlgo}
           />
@@ -406,8 +413,8 @@ export const App = () => {
             algos={algos}
             dataSources={dataSources}
             activeRuns={activeRuns}
-            algoStats={simulation.algoStats}
-            runPnlHistories={simulation.runPnlHistories}
+            algoStats={mergedAlgoStats}
+            runPnlHistories={mergedRunPnlHistories}
             errorsByInstance={errorsByInstance}
             logsByInstance={logsByInstance}
             healthByInstance={healthByInstance}
@@ -426,7 +433,6 @@ export const App = () => {
           <TradingView
             simulation={simulation}
             tradeHistory={tradeHistory}
-            equity={equity}
             rolling={rolling}
             algos={algos}
             activeRuns={activeRuns}
