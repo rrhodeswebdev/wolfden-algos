@@ -4,7 +4,10 @@ import { formatDuration, formatPnl, pnlColorClass } from "../lib/tradingView";
 import { formatPrice } from "../hooks/useTradingSimulation";
 
 type TradeDetailPanelProps = {
-  roundtrip: Roundtrip | null;
+  // TradesTab only mounts this panel when a roundtrip is selected, so the prop is
+  // always non-null. Changing the prop to `Roundtrip | null` would require an
+  // in-component empty state that would be unreachable in practice.
+  roundtrip: Roundtrip;
   onClose: () => void;
 };
 
@@ -45,21 +48,12 @@ const samplePoints = (
 
 export const TradeDetailPanel = ({ roundtrip, onClose }: TradeDetailPanelProps) => {
   useEffect(() => {
-    if (!roundtrip) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [roundtrip, onClose]);
-
-  if (!roundtrip) {
-    return (
-      <div className="bg-[var(--bg-panel)] rounded-lg flex flex-col overflow-hidden h-full items-center justify-center text-sm text-[var(--text-secondary)] border border-dashed border-[var(--border)]">
-        Click a roundtrip to see execution detail
-      </div>
-    );
-  }
+  }, [onClose]);
 
   const r = roundtrip;
   const sideColor = r.side === "Long" ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]";

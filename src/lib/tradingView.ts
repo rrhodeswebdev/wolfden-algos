@@ -56,19 +56,11 @@ export const applyFilters = <T extends Filterable>(items: T[], f: Filters): T[] 
 export const isFilterActive = (f: Filters): boolean =>
   f.chart !== null || f.account !== null || f.algo !== null;
 
-// ----- Formatting helpers (shared by components) -----
+// ----- Formatting helpers -----
 
-export const formatPnl = (v: number): string => {
-  const sign = v >= 0 ? "+" : "-";
-  return `${sign}$${Math.abs(v).toFixed(2)}`;
-};
-
-export const pnlColorClass = (v: number): string =>
-  v > 0
-    ? "text-[var(--accent-green)]"
-    : v < 0
-      ? "text-[var(--accent-red)]"
-      : "text-[var(--text-primary)]";
+// Shared renderers live in ./format; re-exported here so callers can keep
+// importing from "tradingView" without caring where the helper lives.
+export { formatPnl, pnlColorClass, sparklinePoints } from "./format";
 
 export const formatChartLabel = (dsId: string): string => {
   const [instrument, tf] = dsId.split(":");
@@ -81,17 +73,6 @@ export const formatDuration = (fromTs: number, toTs: number): string => {
   if (ms < 60_000) return `${Math.max(0, Math.round(ms / 1000))}s`;
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
   return `${(ms / 3_600_000).toFixed(1)}h`;
-};
-
-export const sparklinePoints = (history: number[], width: number, height: number): string => {
-  if (history.length <= 1) return "";
-  const min = Math.min(...history);
-  const max = Math.max(...history);
-  const range = max - min || 1;
-  const stepX = width / (history.length - 1);
-  return history
-    .map((v, i) => `${(i * stepX).toFixed(2)},${(height - ((v - min) / range) * height).toFixed(2)}`)
-    .join(" ");
 };
 
 // ----- Breakdown aggregation -----

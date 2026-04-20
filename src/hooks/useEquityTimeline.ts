@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { Roundtrip, EquityPoint, DrawdownPoint } from "../lib/tradingView";
+import type { Roundtrip, EquityPoint } from "../lib/tradingView";
 
 type AccountSnapshot = {
   name: string;
@@ -16,21 +16,9 @@ const pushCapped = (arr: EquityPoint[], point: EquityPoint): EquityPoint[] => {
   return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
 };
 
-const deriveDrawdown = (series: EquityPoint[]): DrawdownPoint[] => {
-  let peak = 0;
-  const out: DrawdownPoint[] = [];
-  for (const p of series) {
-    if (p.pnl > peak) peak = p.pnl;
-    out.push({ t: p.t, peak, pnl: p.pnl, underwater: peak - p.pnl });
-  }
-  return out;
-};
-
 export type EquityTimeline = {
   live: EquityPoint[];
   shadow: EquityPoint[];
-  liveDrawdown: DrawdownPoint[];
-  shadowDrawdown: DrawdownPoint[];
 };
 
 const makeInitial = (): EquityPoint[] => [{ t: Date.now(), pnl: 0 }];
@@ -72,8 +60,5 @@ export const useEquityTimeline = (roundtrips: Roundtrip[]): EquityTimeline => {
     setShadow((prev) => pushCapped(prev, { t: latestClose, pnl: rounded }));
   }, [roundtrips]);
 
-  const liveDrawdown = useMemo(() => deriveDrawdown(live), [live]);
-  const shadowDrawdown = useMemo(() => deriveDrawdown(shadow), [shadow]);
-
-  return { live, shadow, liveDrawdown, shadowDrawdown };
+  return { live, shadow };
 };
