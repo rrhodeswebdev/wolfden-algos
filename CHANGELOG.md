@@ -1,3 +1,4 @@
+## [0.5.1](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.5.0...v0.5.1) (2026-04-20)
 ## [0.5.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.4.0...v0.5.0) (2026-04-20)
 
 ### Features
