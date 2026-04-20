@@ -1,3 +1,12 @@
+## [0.5.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.4.0...v0.5.0) (2026-04-20)
+
+### Features
+
+* trading view redesign — unified dashboard (hero + filters + tabs + drill-down) ([#14](https://github.com/rrhodeswebdev/wolfden-algos/issues/14)) ([24a4e5c](https://github.com/rrhodeswebdev/wolfden-algos/commit/24a4e5cdfffd3a137aa1e0fd2b68991dd9c30c93))
+
+### Bug Fixes
+
+* align per-trade and per-algo P&L with NinjaTrader ([#15](https://github.com/rrhodeswebdev/wolfden-algos/issues/15)) ([219bcfe](https://github.com/rrhodeswebdev/wolfden-algos/commit/219bcfe7c1c7ab5b1566043e4f5136bcdec0f95e))
 ## [0.4.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.3.0...v0.4.0) (2026-04-19)
 
 ### Features
