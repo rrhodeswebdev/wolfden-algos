@@ -576,10 +576,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 
             // Always read the latest unrealized straight from the account — our cached
             // value may be stale if UnrealizedProfitLoss hasn't updated since last emit.
+            // Use the account's own denomination (e.g. USD, EUR) instead of hardcoding
+            // USD so non-USD accounts see their real numbers, matching NT's display.
             double currentUnrealized = _cachedAccountUnrealizedPnl;
             if (account != null)
             {
-                try { currentUnrealized = account.Get(AccountItem.UnrealizedProfitLoss, Currency.UsDollar); }
+                try { currentUnrealized = account.Get(AccountItem.UnrealizedProfitLoss, account.Denomination); }
                 catch { }
             }
             _cachedAccountUnrealizedPnl = currentUnrealized;

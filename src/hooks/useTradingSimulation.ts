@@ -236,7 +236,9 @@ export const useTradingSimulation = (_algos: Algo[], _activeRuns: AlgoRun[], _da
   // Track which positions are shadow (by posKey)
   const shadowPositionKeys = useRef<Set<string>>(new Set());
 
-  const TRADE_WAIT_MS_SIM = 3000;
+  // Keep in sync with useTradeHistory.TRADE_WAIT_MS — same rationale. 3s was too
+  // tight for fast whipsaws where the last unrealized snapshot could be a stale MFE.
+  const TRADE_WAIT_MS_SIM = 30000;
   // Ref to avoid stale closures in the sampling interval
   const realizedPnlRef = useRef(0);
 

@@ -92,8 +92,12 @@ type OpenPosition = {
 
 // Live accounts wait this long after nt-position Flat for the nt-trade event before
 // falling back to the unrealized snapshot. NT normally posts realized-P&L within a few
-// hundred ms of the fill; 3 seconds is a generous safety net.
-const TRADE_WAIT_MS = 3000;
+// hundred ms of the fill, but the last position event can be up to 500ms stale and may
+// reflect a peak MFE, so falling back to it on a fast whipsaw would record the MFE
+// instead of the actual close P&L (e.g. shows +$150 for a trade that closed -$135).
+// We wait 30s to cover any reasonable bridge-to-frontend latency; past that we fall
+// back with a console warning and update the roundtrip if the trade eventually arrives.
+const TRADE_WAIT_MS = 30000;
 
 export type TradeHistory = {
   roundtrips: Roundtrip[];
@@ -247,6 +251,19 @@ export const useTradeHistory = (algos: Algo[], activeRuns: AlgoRun[]): TradeHist
     const useNtPnl = open.account !== "shadow" && open.ntTradeCount > 0;
     const finalPnl = useNtPnl ? open.ntPnl : open.lastPnl;
     const exitPrice = open.ntExitPrice ?? open.lastExitPrice ?? open.entryPrice;
+    // Track which trips came from the unrealized fallback so a late nt-trade event can
+    // correct them (see the nt-trade handler). Also warn: fallback means the stored
+    // pnl is the last unrealized snapshot, which can drift badly on a fast whipsaw
+    // (e.g. +$150 MFE recorded for a trade that closed -$135). Primary cause is the
+    // bridge not recompiled with the SystemPerformance fix; with recompile this path
+    // should be rare.
+    if (!useNtPnl && open.account !== "shadow") {
+      console.warn(
+        `[useTradeHistory] roundtrip for ${posKey} finalized from unrealized fallback — ` +
+        `nt-trade did not arrive within ${TRADE_WAIT_MS}ms of Flat. ` +
+        `pnl=${open.lastPnl} may drift from NT. Will auto-correct if the trade event lands later.`,
+      );
+    }
     const trip: Roundtrip = {
       id: `${posKey}-${open.openTimestamp}`,
       symbol: open.symbol,
@@ -340,23 +357,62 @@ export const useTradeHistory = (algos: Algo[], activeRuns: AlgoRun[]): TradeHist
 
   // NinjaTrader-reported realized P&L per roundtrip. Accumulates into the open position;
   // if the Flat event already arrived and is waiting on the trade, finalize immediately.
+  // If the open position is already gone (trade arrived after our fallback timeout
+  // finalized), correct the most recent roundtrip for that posKey so the P&L tracks
+  // NT even when the event was late.
   useEffect(() => {
     const unlisten = listen<TradeEvent>("nt-trade", (event) => {
       const t = event.payload;
       const posKey = posKeyOf(t.source_id, t.symbol, t.account);
       const open = openPositions.current.get(posKey);
-      if (!open) return;
-      open.ntPnl += t.pnl;
-      open.ntTradeCount += 1;
-      open.ntExitPrice = t.exit_price;
-      // First non-empty instance_id wins — subsequent partial closes in the same roundtrip
-      // should all carry the same algo attribution from the bridge's _orderTracker.
-      if (!open.ntInstanceId && t.instance_id) {
-        open.ntInstanceId = t.instance_id;
+
+      if (open) {
+        open.ntPnl += t.pnl;
+        open.ntTradeCount += 1;
+        open.ntExitPrice = t.exit_price;
+        // First non-empty instance_id wins — subsequent partial closes in the same
+        // roundtrip should all carry the same algo attribution from the bridge.
+        if (!open.ntInstanceId && t.instance_id) {
+          open.ntInstanceId = t.instance_id;
+        }
+        if (open.closingPending) {
+          finalizeRoundtrip(posKey);
+        }
+        return;
       }
-      if (open.closingPending) {
-        finalizeRoundtrip(posKey);
-      }
+
+      // Late-arriving trade for a roundtrip that was already finalized via fallback.
+      // Find the most recent trip for this posKey, within a reasonable window, and
+      // overwrite its pnl (plus exit price / instance) with NT's authoritative value.
+      setRoundtrips((prev) => {
+        const windowMs = 5 * 60 * 1000; // 5 minutes is plenty for late bridge events
+        const now = Date.now();
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const r = prev[i];
+          if (
+            r.account === t.account &&
+            r.symbol === t.symbol &&
+            r.dataSourceId === t.source_id &&
+            now - r.closeTimestamp <= windowMs
+          ) {
+            const correctedPnl = Math.round(t.pnl * 100) / 100;
+            console.warn(
+              `[useTradeHistory] correcting late roundtrip ${r.id}: ` +
+              `pnl ${r.pnl} -> ${correctedPnl} from late nt-trade`,
+            );
+            const corrected: Roundtrip = {
+              ...r,
+              pnl: correctedPnl,
+              exitPrice: t.exit_price || r.exitPrice,
+              instanceId: r.instanceId || t.instance_id,
+            };
+            const next = [...prev];
+            next[i] = corrected;
+            return next;
+          }
+        }
+        return prev;
+      });
     });
     return () => {
       unlisten.then((f) => f());
