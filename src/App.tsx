@@ -14,7 +14,6 @@ import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import { useTradeHistory } from "./hooks/useTradeHistory";
-import { useStrategyPnl } from "./hooks/useStrategyPnl";
 import { useRollingMetrics } from "./hooks/useRollingMetrics";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import { useAlgoLogs } from "./hooks/useAlgoLogs";
@@ -54,7 +53,6 @@ export const App = () => {
 
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
   const tradeHistory = useTradeHistory(algos, activeRuns);
-  const strategyPnl = useStrategyPnl();
   const rolling = useRollingMetrics(tradeHistory.roundtrips);
 
   // Merge backtest stats (from useTradingSimulation) with live roundtrip-derived stats
@@ -435,7 +433,6 @@ export const App = () => {
           <TradingView
             simulation={simulation}
             tradeHistory={tradeHistory}
-            strategyPnl={strategyPnl}
             rolling={rolling}
             algos={algos}
             activeRuns={activeRuns}

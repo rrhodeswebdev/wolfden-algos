@@ -150,14 +150,6 @@ pub enum NtInbound {
         #[serde(default)]
         unrealized_pnl: f64,
     },
-    #[serde(rename = "strategy_pnl")]
-    StrategyPnl {
-        source_id: String,
-        symbol: String,
-        realized: f64,
-        unrealized: f64,
-        total: f64,
-    },
     #[serde(rename = "order_update")]
     OrderUpdate {
         source_id: String,

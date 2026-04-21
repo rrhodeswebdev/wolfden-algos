@@ -29,19 +29,6 @@ pub struct AccountSnapshot {
     pub unrealized_pnl: f64,
 }
 
-/// Strategy-scoped P&L snapshot emitted to the frontend. Sourced directly from
-/// NT's SystemPerformance.AllTrades (realized) and the strategy's Position
-/// (unrealized) — the same numbers NT's Strategy Performance view shows.
-#[derive(Debug, Clone, Serialize)]
-pub struct StrategyPnlEvent {
-    pub source_id: String,
-    pub account: String,
-    pub symbol: String,
-    pub realized: f64,
-    pub unrealized: f64,
-    pub total: f64,
-}
-
 /// Chart info emitted to the frontend when a NinjaTrader chart connects.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChartInfo {
@@ -273,21 +260,6 @@ pub async fn start(
                                             cash: *cash,
                                             realized_pnl: *realized_pnl,
                                             unrealized_pnl: *unrealized_pnl,
-                                        });
-                                    }
-                                }
-
-                                // On StrategyPnl update, relay with connection's account name
-                                if let NtInbound::StrategyPnl { source_id, symbol, realized, unrealized, total } = &parsed {
-                                    let acct = account_name.read().await;
-                                    if let Some(ref name) = *acct {
-                                        let _ = app_handle.emit("nt-strategy-pnl", StrategyPnlEvent {
-                                            source_id: source_id.clone(),
-                                            account: name.clone(),
-                                            symbol: symbol.clone(),
-                                            realized: *realized,
-                                            unrealized: *unrealized,
-                                            total: *total,
                                         });
                                     }
                                 }

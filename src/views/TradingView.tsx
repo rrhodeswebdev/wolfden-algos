@@ -6,7 +6,6 @@ import type {
   Position,
 } from "../hooks/useTradingSimulation";
 import type { TradeHistory } from "../hooks/useTradeHistory";
-import type { StrategyPnlState } from "../hooks/useStrategyPnl";
 import type { RollingMetrics } from "../hooks/useRollingMetrics";
 import {
   type Filters,
@@ -40,7 +39,6 @@ type AccountSummary = {
 type TradingViewProps = {
   simulation: TradingSimulation;
   tradeHistory: TradeHistory;
-  strategyPnl: StrategyPnlState;
   rolling: RollingMetrics;
   algos: Algo[];
   activeRuns: AlgoRun[];
@@ -107,7 +105,6 @@ const useOpenSinceMap = (positions: Position[]): Map<string, number> => {
 export const TradingView = ({
   simulation,
   tradeHistory,
-  strategyPnl,
   rolling,
   algos,
   activeRuns,
@@ -211,20 +208,15 @@ export const TradingView = ({
     [heroRoundtrips],
   );
 
-  // Hero realized/unrealized/total come straight from NT's own strategy snapshot
-  // (SystemPerformance.AllTrades + Position.GetUnrealizedProfitLoss, aggregated across
-  // every running bridge). Trade count / win rate / Sharpe / drawdown stay derived
-  // from our roundtrip store since NT doesn't push those as a running total and the
-  // per-trade analytics tabs need the roundtrips anyway.
-  const heroKpis = useMemo(() => {
-    const roundtripKpis = deriveHeroKpis(heroRoundtrips, heroPositions, heroDrawdown);
-    return {
-      ...roundtripKpis,
-      realizedPnl: strategyPnl.total.realized,
-      unrealizedPnl: strategyPnl.total.unrealized,
-      totalPnl: strategyPnl.total.total,
-    };
-  }, [heroRoundtrips, heroPositions, heroDrawdown, strategyPnl.total]);
+  // Hero is scoped to currently-active algo instances: heroRoundtrips filtered by
+  // activeInstanceIds, heroPositions filtered by activeChartAccountKeys. Per-trade
+  // pnl on the roundtrips comes from NT's SystemPerformance.AllTrades (see the
+  // bridge), so summing them here gives the NT-authoritative realized total scoped
+  // to running algos only — dropping to zero when the user stops them.
+  const heroKpis = useMemo(
+    () => deriveHeroKpis(heroRoundtrips, heroPositions, heroDrawdown),
+    [heroRoundtrips, heroPositions, heroDrawdown],
+  );
 
   const openSinceByPosKey = useOpenSinceMap(simulation.positions);
 
