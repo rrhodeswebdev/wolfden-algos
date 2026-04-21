@@ -79,6 +79,10 @@ type OpenPosition = {
   ntPnl: number;
   ntTradeCount: number;
   ntExitPrice: number | null;
+  // instance_id carried on the nt-trade event. The bridge captures this from the closing
+  // order's _orderTracker entry, so it's accurate even if the algo is stopped before we
+  // finalize the roundtrip — more reliable than re-resolving via activeRuns at close time.
+  ntInstanceId: string | null;
   // Flat arrived from NT but we're still waiting for the nt-trade event that carries
   // NT's final realized P&L. Finalize the roundtrip when the trade arrives (or on timeout).
   closingPending: boolean;
@@ -186,10 +190,29 @@ export const useTradeHistory = (algos: Algo[], activeRuns: AlgoRun[]): TradeHist
     activeRunsRef.current = activeRuns;
   }, [activeRuns]);
 
-  // Resolve algo + instance attribution from the current live run table.
-  // If the instance has already stopped by the time the trip closes, we
-  // fall back to the best-effort values (algoId = 0, empty names).
-  const resolveAttribution = (dataSourceId: string, account: string) => {
+  // Resolve algo + instance attribution. Preferred source is the instance_id the bridge
+  // captured at order-tracker time (carried on nt-trade). Fall back to the currently-active
+  // run for the chart+account combo if the bridge couldn't attribute (e.g. shadow accounts,
+  // or a trade closed via manual NT action that wasn't tracked as an algo order).
+  const resolveAttribution = (
+    dataSourceId: string,
+    account: string,
+    ntInstanceId: string | null,
+  ) => {
+    if (ntInstanceId) {
+      const run = activeRunsRef.current.find((r) => r.instance_id === ntInstanceId);
+      if (run) {
+        const algo = algosRef.current.find((a) => a.id === run.algo_id);
+        return {
+          algoId: run.algo_id,
+          algoName: algo?.name ?? `algo ${run.algo_id}`,
+          instanceId: ntInstanceId,
+        };
+      }
+      // Run not currently active — still carry the id forward so historical roundtrips
+      // keep attribution after the algo stops.
+      return { algoId: 0, algoName: "", instanceId: ntInstanceId };
+    }
     const run = activeRunsRef.current.find(
       (r) => r.data_source_id === dataSourceId && r.account === account,
     );
@@ -215,7 +238,11 @@ export const useTradeHistory = (algos: Algo[], activeRuns: AlgoRun[]): TradeHist
       open.closingTimeoutId = null;
     }
     const closeTs = open.closingFlatTimestamp ?? Date.now();
-    const { algoId, algoName, instanceId } = resolveAttribution(open.dataSourceId, open.account);
+    const { algoId, algoName, instanceId } = resolveAttribution(
+      open.dataSourceId,
+      open.account,
+      open.ntInstanceId,
+    );
     const { mae, mfe } = deriveMaeMfe(open.samples);
     const useNtPnl = open.account !== "shadow" && open.ntTradeCount > 0;
     const finalPnl = useNtPnl ? open.ntPnl : open.lastPnl;
@@ -299,6 +326,7 @@ export const useTradeHistory = (algos: Algo[], activeRuns: AlgoRun[]): TradeHist
           ntPnl: 0,
           ntTradeCount: 0,
           ntExitPrice: null,
+          ntInstanceId: null,
           closingPending: false,
           closingFlatTimestamp: null,
           closingTimeoutId: null,
@@ -321,6 +349,11 @@ export const useTradeHistory = (algos: Algo[], activeRuns: AlgoRun[]): TradeHist
       open.ntPnl += t.pnl;
       open.ntTradeCount += 1;
       open.ntExitPrice = t.exit_price;
+      // First non-empty instance_id wins — subsequent partial closes in the same roundtrip
+      // should all carry the same algo attribution from the bridge's _orderTracker.
+      if (!open.ntInstanceId && t.instance_id) {
+        open.ntInstanceId = t.instance_id;
+      }
       if (open.closingPending) {
         finalizeRoundtrip(posKey);
       }
