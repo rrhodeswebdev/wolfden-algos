@@ -23,6 +23,23 @@ pub struct AccountSnapshot {
     pub buying_power: f64,
     pub cash: f64,
     pub realized_pnl: f64,
+    /// Account-wide unrealized P&L (NT's own aggregate across all positions on the
+    /// account, including manual ones). Combined with `realized_pnl` on the home
+    /// dashboard so "Day P&L" matches what NT's Control Center displays.
+    pub unrealized_pnl: f64,
+}
+
+/// Strategy-scoped P&L snapshot emitted to the frontend. Sourced directly from
+/// NT's SystemPerformance.AllTrades (realized) and the strategy's Position
+/// (unrealized) — the same numbers NT's Strategy Performance view shows.
+#[derive(Debug, Clone, Serialize)]
+pub struct StrategyPnlEvent {
+    pub source_id: String,
+    pub account: String,
+    pub symbol: String,
+    pub realized: f64,
+    pub unrealized: f64,
+    pub total: f64,
 }
 
 /// Chart info emitted to the frontend when a NinjaTrader chart connects.
@@ -224,6 +241,7 @@ pub async fn start(
                                         buying_power: 0.0,
                                         cash: 0.0,
                                         realized_pnl: 0.0,
+                                        unrealized_pnl: 0.0,
                                     });
 
                                     // Emit chart connected event
@@ -246,7 +264,7 @@ pub async fn start(
                                 }
 
                                 // On Account update, emit with the connection's account name
-                                if let NtInbound::Account { buying_power, cash, realized_pnl } = &parsed {
+                                if let NtInbound::Account { buying_power, cash, realized_pnl, unrealized_pnl } = &parsed {
                                     let acct = account_name.read().await;
                                     if let Some(ref name) = *acct {
                                         let _ = app_handle.emit("nt-account", AccountSnapshot {
@@ -254,6 +272,22 @@ pub async fn start(
                                             buying_power: *buying_power,
                                             cash: *cash,
                                             realized_pnl: *realized_pnl,
+                                            unrealized_pnl: *unrealized_pnl,
+                                        });
+                                    }
+                                }
+
+                                // On StrategyPnl update, relay with connection's account name
+                                if let NtInbound::StrategyPnl { source_id, symbol, realized, unrealized, total } = &parsed {
+                                    let acct = account_name.read().await;
+                                    if let Some(ref name) = *acct {
+                                        let _ = app_handle.emit("nt-strategy-pnl", StrategyPnlEvent {
+                                            source_id: source_id.clone(),
+                                            account: name.clone(),
+                                            symbol: symbol.clone(),
+                                            realized: *realized,
+                                            unrealized: *unrealized,
+                                            total: *total,
                                         });
                                     }
                                 }

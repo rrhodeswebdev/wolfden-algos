@@ -42,6 +42,7 @@ type AccountData = {
   buying_power: number;
   cash: number;
   realized_pnl: number;
+  unrealized_pnl: number;
 };
 
 type HomeViewProps = {
@@ -64,8 +65,6 @@ export const HomeView = (props: HomeViewProps) => {
   const accountNames = Object.keys(props.accounts);
   const accountPositionCount = (accountName: string) =>
     props.positions.filter((p) => p.account === accountName).length;
-  const accountLivePnl = (accountName: string) =>
-    props.positions.filter((p) => p.account === accountName).reduce((sum, p) => sum + p.targetPnl, 0);
   const accountIsActive = (accountName: string) =>
     props.activeRuns.some((r) => r.account === accountName);
   const connectionLabel =
@@ -132,7 +131,10 @@ export const HomeView = (props: HomeViewProps) => {
               {accountNames.map((name) => {
                 const data = props.accounts[name];
                 const balance = data.cash || data.buying_power;
-                const dayPnl = data.realized_pnl + accountLivePnl(name);
+                // Day P&L comes straight from NT: RealizedProfitLoss (daily) + the
+                // account-wide UnrealizedProfitLoss aggregate. Matches NT's Control
+                // Center account row without us summing individual positions.
+                const dayPnl = data.realized_pnl + data.unrealized_pnl;
                 return (
                   <AccountCard
                     key={name}

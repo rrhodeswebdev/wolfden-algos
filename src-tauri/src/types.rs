@@ -147,6 +147,16 @@ pub enum NtInbound {
         buying_power: f64,
         cash: f64,
         realized_pnl: f64,
+        #[serde(default)]
+        unrealized_pnl: f64,
+    },
+    #[serde(rename = "strategy_pnl")]
+    StrategyPnl {
+        source_id: String,
+        symbol: String,
+        realized: f64,
+        unrealized: f64,
+        total: f64,
     },
     #[serde(rename = "order_update")]
     OrderUpdate {

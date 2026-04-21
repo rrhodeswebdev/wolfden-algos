@@ -14,6 +14,7 @@ import { AiTerminalPanel } from "./components/AiTerminalPanel";
 import { ToastContainer, toast } from "./components/Toast";
 import { useTradingSimulation } from "./hooks/useTradingSimulation";
 import { useTradeHistory } from "./hooks/useTradeHistory";
+import { useStrategyPnl } from "./hooks/useStrategyPnl";
 import { useRollingMetrics } from "./hooks/useRollingMetrics";
 import { useAlgoErrors } from "./hooks/useAlgoErrors";
 import { useAlgoLogs } from "./hooks/useAlgoLogs";
@@ -27,7 +28,7 @@ export const App = () => {
   const [activeView, setActiveView] = useState<View>("home");
   const [pendingNavContext, setPendingNavContext] = useState<NavContext | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"waiting" | "connected" | "error">("waiting");
-  const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number }>>({});
+  const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number; unrealized_pnl: number }>>({});
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [algos, setAlgos] = useState<Algo[]>([]);
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
@@ -53,6 +54,7 @@ export const App = () => {
 
   const simulation = useTradingSimulation(algos, activeRuns, dataSources);
   const tradeHistory = useTradeHistory(algos, activeRuns);
+  const strategyPnl = useStrategyPnl();
   const rolling = useRollingMetrics(tradeHistory.roundtrips);
 
   // Merge backtest stats (from useTradingSimulation) with live roundtrip-derived stats
@@ -134,7 +136,7 @@ export const App = () => {
     const u1 = listen<number>("nt-connection-count", (event) => {
       setConnectionStatus(event.payload > 0 ? "connected" : "waiting");
     });
-    const u2 = listen<{ name: string; buying_power: number; cash: number; realized_pnl: number }>("nt-account", (event) => {
+    const u2 = listen<{ name: string; buying_power: number; cash: number; realized_pnl: number; unrealized_pnl: number }>("nt-account", (event) => {
       const { name, ...data } = event.payload;
       setAccounts((prev) => ({ ...prev, [name]: data }));
     });
@@ -433,6 +435,7 @@ export const App = () => {
           <TradingView
             simulation={simulation}
             tradeHistory={tradeHistory}
+            strategyPnl={strategyPnl}
             rolling={rolling}
             algos={algos}
             activeRuns={activeRuns}

@@ -37,8 +37,13 @@ namespace NinjaTrader.NinjaScript.Strategies
         private double                                      _cachedBuyingPower;
         private double                                      _cachedCash;
         private double                                      _cachedRealizedPnl;
+        private double                                      _cachedAccountUnrealizedPnl;
         private DateTime                                    _lastAccountSend = DateTime.MinValue;
         private DateTime                                    _lastPositionSend = DateTime.MinValue;
+
+        // Throttle for the strategy P&L snapshot (matches NT's Strategy Performance view).
+        // We emit on market data ticks; once per second is plenty for the desktop UI.
+        private DateTime                                    _lastStrategyPnlSend = DateTime.MinValue;
 
         // Tracks the current strategy-level position side so OnExecutionUpdate can
         // identify closing executions and snapshot exit attribution before the trade emits.
@@ -338,6 +343,47 @@ namespace NinjaTrader.NinjaScript.Strategies
                     "unrealized_pnl", unrealizedPnl
                 ));
             }
+
+            // Strategy P&L snapshot — matches what NT's Strategy Performance view shows
+            // (cumulative realized from SystemPerformance.AllTrades + current unrealized).
+            // Throttled to 1s; this is the authoritative source for the desktop Trading View.
+            if ((e.Time - _lastStrategyPnlSend).TotalMilliseconds >= 1000)
+            {
+                _lastStrategyPnlSend = e.Time;
+                SendStrategyPnl();
+            }
+        }
+
+        /// <summary>
+        /// Emits a `strategy_pnl` message carrying NT's own strategy-scoped totals —
+        /// cumulative realized from SystemPerformance.AllTrades and the current position's
+        /// unrealized P&L. The desktop Trading View displays these directly so its
+        /// headline numbers match NT's Strategy Performance view by construction.
+        /// </summary>
+        private void SendStrategyPnl()
+        {
+            if (_ws == null || !_ws.IsConnected) return;
+
+            double realized = 0;
+            try { realized = SystemPerformance.AllTrades.TradesPerformance.Currency.CumProfit; }
+            catch { }
+
+            double unrealized = 0;
+            try
+            {
+                if (Position != null && Position.MarketPosition != MarketPosition.Flat)
+                    unrealized = Position.GetUnrealizedProfitLoss(PerformanceUnit.Currency);
+            }
+            catch { }
+
+            _ws.Send(Json.Build(
+                "type",       "strategy_pnl",
+                "source_id",  _sourceId,
+                "symbol",     _symbol,
+                "realized",   realized,
+                "unrealized", unrealized,
+                "total",      realized + unrealized
+            ));
         }
 
         protected override void OnOrderUpdate(Order order, double limitPrice, double stopPrice,
@@ -465,6 +511,12 @@ namespace NinjaTrader.NinjaScript.Strategies
             // Safety net: if SystemPerformance.AllTrades was updated between the closing
             // execution and this callback, emit here so the trade doesn't sit silent.
             EmitNewSystemPerformanceTrades();
+
+            // Position change always affects the strategy P&L snapshot — push an
+            // immediate update so the Trading View doesn't wait up to 1s for the next
+            // tick. Don't touch _lastStrategyPnlSend (different clock domain than the
+            // OnMarketData throttle); a small double-emit on the next tick is harmless.
+            SendStrategyPnl();
         }
 
         /// <summary>
@@ -561,17 +613,34 @@ namespace NinjaTrader.NinjaScript.Strategies
                     // SystemPerformance.AllTrades — poll here as a third safety net.
                     EmitNewSystemPerformanceTrades();
                     break;
+                case AccountItem.UnrealizedProfitLoss:
+                    // Account-wide unrealized P&L (all positions on the account, including
+                    // manual ones not touched by any strategy). Home dashboard uses this
+                    // + RealizedProfitLoss to match NT's Control Center daily total.
+                    _cachedAccountUnrealizedPnl = value;
+                    break;
                 default: return;
             }
 
             if ((DateTime.Now - _lastAccountSend).TotalSeconds < 1) return;
             _lastAccountSend = DateTime.Now;
 
+            // Always read the latest unrealized straight from the account — our cached
+            // value may be stale if UnrealizedProfitLoss hasn't updated since last emit.
+            double currentUnrealized = _cachedAccountUnrealizedPnl;
+            if (account != null)
+            {
+                try { currentUnrealized = account.Get(AccountItem.UnrealizedProfitLoss, Currency.UsDollar); }
+                catch { }
+            }
+            _cachedAccountUnrealizedPnl = currentUnrealized;
+
             _ws.Send(Json.Build(
-                "type",         "account",
-                "buying_power", _cachedBuyingPower,
-                "cash",         _cachedCash,
-                "realized_pnl", _cachedRealizedPnl
+                "type",           "account",
+                "buying_power",   _cachedBuyingPower,
+                "cash",           _cachedCash,
+                "realized_pnl",   _cachedRealizedPnl,
+                "unrealized_pnl", _cachedAccountUnrealizedPnl
             ));
         }
 

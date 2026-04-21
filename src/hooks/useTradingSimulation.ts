@@ -149,6 +149,7 @@ type AccountSnapshot = {
   buying_power: number;
   cash: number;
   realized_pnl: number;
+  unrealized_pnl: number;
 };
 
 type TradeEvent = {

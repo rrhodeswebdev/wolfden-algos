@@ -6,6 +6,7 @@ import type {
   Position,
 } from "../hooks/useTradingSimulation";
 import type { TradeHistory } from "../hooks/useTradeHistory";
+import type { StrategyPnlState } from "../hooks/useStrategyPnl";
 import type { RollingMetrics } from "../hooks/useRollingMetrics";
 import {
   type Filters,
@@ -33,11 +34,13 @@ type AccountSummary = {
   buying_power: number;
   cash: number;
   realized_pnl: number;
+  unrealized_pnl: number;
 };
 
 type TradingViewProps = {
   simulation: TradingSimulation;
   tradeHistory: TradeHistory;
+  strategyPnl: StrategyPnlState;
   rolling: RollingMetrics;
   algos: Algo[];
   activeRuns: AlgoRun[];
@@ -104,6 +107,7 @@ const useOpenSinceMap = (positions: Position[]): Map<string, number> => {
 export const TradingView = ({
   simulation,
   tradeHistory,
+  strategyPnl,
   rolling,
   algos,
   activeRuns,
@@ -207,10 +211,20 @@ export const TradingView = ({
     [heroRoundtrips],
   );
 
-  const heroKpis = useMemo(
-    () => deriveHeroKpis(heroRoundtrips, heroPositions, heroDrawdown),
-    [heroRoundtrips, heroPositions, heroDrawdown],
-  );
+  // Hero realized/unrealized/total come straight from NT's own strategy snapshot
+  // (SystemPerformance.AllTrades + Position.GetUnrealizedProfitLoss, aggregated across
+  // every running bridge). Trade count / win rate / Sharpe / drawdown stay derived
+  // from our roundtrip store since NT doesn't push those as a running total and the
+  // per-trade analytics tabs need the roundtrips anyway.
+  const heroKpis = useMemo(() => {
+    const roundtripKpis = deriveHeroKpis(heroRoundtrips, heroPositions, heroDrawdown);
+    return {
+      ...roundtripKpis,
+      realizedPnl: strategyPnl.total.realized,
+      unrealizedPnl: strategyPnl.total.unrealized,
+      totalPnl: strategyPnl.total.total,
+    };
+  }, [heroRoundtrips, heroPositions, heroDrawdown, strategyPnl.total]);
 
   const openSinceByPosKey = useOpenSinceMap(simulation.positions);
 
