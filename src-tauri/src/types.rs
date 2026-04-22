@@ -147,6 +147,8 @@ pub enum NtInbound {
         buying_power: f64,
         cash: f64,
         realized_pnl: f64,
+        #[serde(default)]
+        unrealized_pnl: f64,
     },
     #[serde(rename = "order_update")]
     OrderUpdate {

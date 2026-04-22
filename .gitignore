@@ -42,3 +42,6 @@ src-tauri/target/
 
 # Superpowers brainstorm scratch dir
 .superpowers/
+
+# Git worktrees
+.worktrees/

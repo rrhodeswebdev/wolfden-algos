@@ -27,7 +27,7 @@ export const App = () => {
   const [activeView, setActiveView] = useState<View>("home");
   const [pendingNavContext, setPendingNavContext] = useState<NavContext | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"waiting" | "connected" | "error">("waiting");
-  const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number }>>({});
+  const [accounts, setAccounts] = useState<Record<string, { buying_power: number; cash: number; realized_pnl: number; unrealized_pnl: number }>>({});
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [algos, setAlgos] = useState<Algo[]>([]);
   const [activeRuns, setActiveRuns] = useState<AlgoRun[]>([]);
@@ -71,7 +71,9 @@ export const App = () => {
     } catch (e) {
       console.error("Failed to auto-stop algo:", e);
     }
-    setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
+    // Leave the halted instance in activeRuns so the UI can show the "halted"
+    // state (see algoInstanceView.ts and AlgoDetailPanel Errors tab). The
+    // user dismisses it explicitly via Stop, which calls handleStopAlgo.
   }, []);
 
   const { errorsByInstance, clearErrors } = useAlgoErrors(handleAutoStop);
@@ -134,7 +136,7 @@ export const App = () => {
     const u1 = listen<number>("nt-connection-count", (event) => {
       setConnectionStatus(event.payload > 0 ? "connected" : "waiting");
     });
-    const u2 = listen<{ name: string; buying_power: number; cash: number; realized_pnl: number }>("nt-account", (event) => {
+    const u2 = listen<{ name: string; buying_power: number; cash: number; realized_pnl: number; unrealized_pnl: number }>("nt-account", (event) => {
       const { name, ...data } = event.payload;
       setAccounts((prev) => ({ ...prev, [name]: data }));
     });

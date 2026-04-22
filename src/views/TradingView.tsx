@@ -33,6 +33,7 @@ type AccountSummary = {
   buying_power: number;
   cash: number;
   realized_pnl: number;
+  unrealized_pnl: number;
 };
 
 type TradingViewProps = {
@@ -207,6 +208,11 @@ export const TradingView = ({
     [heroRoundtrips],
   );
 
+  // Hero is scoped to currently-active algo instances: heroRoundtrips filtered by
+  // activeInstanceIds, heroPositions filtered by activeChartAccountKeys. Per-trade
+  // pnl on the roundtrips comes from NT's SystemPerformance.AllTrades (see the
+  // bridge), so summing them here gives the NT-authoritative realized total scoped
+  // to running algos only — dropping to zero when the user stops them.
   const heroKpis = useMemo(
     () => deriveHeroKpis(heroRoundtrips, heroPositions, heroDrawdown),
     [heroRoundtrips, heroPositions, heroDrawdown],

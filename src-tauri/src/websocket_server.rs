@@ -23,6 +23,10 @@ pub struct AccountSnapshot {
     pub buying_power: f64,
     pub cash: f64,
     pub realized_pnl: f64,
+    /// Account-wide unrealized P&L (NT's own aggregate across all positions on the
+    /// account, including manual ones). Combined with `realized_pnl` on the home
+    /// dashboard so "Day P&L" matches what NT's Control Center displays.
+    pub unrealized_pnl: f64,
 }
 
 /// Chart info emitted to the frontend when a NinjaTrader chart connects.
@@ -224,6 +228,7 @@ pub async fn start(
                                         buying_power: 0.0,
                                         cash: 0.0,
                                         realized_pnl: 0.0,
+                                        unrealized_pnl: 0.0,
                                     });
 
                                     // Emit chart connected event
@@ -246,7 +251,7 @@ pub async fn start(
                                 }
 
                                 // On Account update, emit with the connection's account name
-                                if let NtInbound::Account { buying_power, cash, realized_pnl } = &parsed {
+                                if let NtInbound::Account { buying_power, cash, realized_pnl, unrealized_pnl } = &parsed {
                                     let acct = account_name.read().await;
                                     if let Some(ref name) = *acct {
                                         let _ = app_handle.emit("nt-account", AccountSnapshot {
@@ -254,6 +259,7 @@ pub async fn start(
                                             buying_power: *buying_power,
                                             cash: *cash,
                                             realized_pnl: *realized_pnl,
+                                            unrealized_pnl: *unrealized_pnl,
                                         });
                                     }
                                 }
