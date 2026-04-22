@@ -1,3 +1,8 @@
+## [0.6.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.5.1...v0.6.0) (2026-04-22)
+
+### Bug Fixes
+
+* per-trade P&L from NT SystemPerformance + installed-build runner.py lookup ([#17](https://github.com/rrhodeswebdev/wolfden-algos/issues/17)) ([681a071](https://github.com/rrhodeswebdev/wolfden-algos/commit/681a0716acb42413ec5fe183970a67923262a5bb))
 ## [0.5.1](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.5.0...v0.5.1) (2026-04-20)
 ## [0.5.0](https://github.com/rrhodeswebdev/wolfden-algos/compare/v0.4.0...v0.5.0) (2026-04-20)
 

@@ -1,6 +1,6 @@
 [package]
 name = "wolf-den"
-version = "0.5.1"
+version = "0.6.0"
 description = "High-performance algo trading desktop app"
 authors = ["you"]
 license = ""
