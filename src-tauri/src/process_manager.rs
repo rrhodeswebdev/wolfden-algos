@@ -66,11 +66,11 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
-    pub fn new(app_data_dir: PathBuf, venv_python: PathBuf) -> Self {
+    pub fn new(app_data_dir: PathBuf, venv_python: PathBuf, resource_dir: Option<PathBuf>) -> Self {
         let algo_dir = app_data_dir.join("algos");
         fs::create_dir_all(&algo_dir).ok();
 
-        let runner_path = Self::find_runner();
+        let runner_path = Self::find_runner(resource_dir.as_ref());
 
         ProcessManager {
             processes: Mutex::new(HashMap::new()),
@@ -80,25 +80,45 @@ impl ProcessManager {
         }
     }
 
-    fn find_runner() -> PathBuf {
-        // Try exe-relative path first (most reliable in production), then CWD-based fallbacks for dev
-        let candidates = [
-            // Relative to executable for release builds — tried first for reliability
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("algo_runtime/runner.py")))
-                .unwrap_or_default(),
-            // In dev: relative to the CWD
-            PathBuf::from("algo_runtime/runner.py"),
-            PathBuf::from("../algo_runtime/runner.py"),
-        ];
+    fn find_runner(resource_dir: Option<&PathBuf>) -> PathBuf {
+        // Build the search list for runner.py. Order matters:
+        // installed-app locations (resource_dir) come first because in production
+        // the CWD-relative paths will silently miss and we need the bundled copy.
+        //
+        // The bundle config in tauri.conf.json declares "../algo_runtime/**/*"
+        // as resources. Because that path begins with "..", Tauri v2 mangles the
+        // upward traversal into an "_up_" segment under the resource directory,
+        // so the file lands at <resource_dir>/_up_/algo_runtime/runner.py.
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(res_dir) = resource_dir {
+            candidates.push(res_dir.join("_up_").join("algo_runtime").join("runner.py"));
+            // Defensive fallback in case Tauri ever changes the mangling rule.
+            candidates.push(res_dir.join("algo_runtime").join("runner.py"));
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                candidates.push(parent.join("algo_runtime/runner.py"));
+            }
+        }
+        // Dev-mode fallbacks (running `cargo tauri dev` from the repo).
+        candidates.push(PathBuf::from("algo_runtime/runner.py"));
+        candidates.push(PathBuf::from("../algo_runtime/runner.py"));
+
         for c in &candidates {
             if c.exists() {
+                log::info!("Found runner.py at {:?}", c);
                 return c.clone();
             }
         }
-        // Default fallback
-        PathBuf::from("algo_runtime/runner.py")
+
+        log::error!("runner.py not found. Searched: {:?}", candidates);
+        // Keep the first candidate so the later error message points at
+        // the most-likely-correct path (the installed-app location when
+        // resource_dir is available).
+        candidates
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| PathBuf::from("algo_runtime/runner.py"))
     }
 
     /// Spawns a Python algo process for the given instance.

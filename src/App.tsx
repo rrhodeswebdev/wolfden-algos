@@ -71,7 +71,9 @@ export const App = () => {
     } catch (e) {
       console.error("Failed to auto-stop algo:", e);
     }
-    setActiveRuns((prev) => prev.filter((r) => r.instance_id !== instanceId));
+    // Leave the halted instance in activeRuns so the UI can show the "halted"
+    // state (see algoInstanceView.ts and AlgoDetailPanel Errors tab). The
+    // user dismisses it explicitly via Stop, which calls handleStopAlgo.
   }, []);
 
   const { errorsByInstance, clearErrors } = useAlgoErrors(handleAutoStop);
